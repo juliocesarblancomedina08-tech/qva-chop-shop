@@ -1,0 +1,110 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  background: #080808;
+  color: #ffffff;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button {
+  font-family: inherit;
+}
+
+.shop-container {
+  min-height: 100vh;
+  padding: 24px 16px 40px;
+}
+
+.header {
+  max-width: 1100px;
+  margin: 0 auto 40px;
+  text-align: center;
+}
+
+.logo {
+  font-size: 30px;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.subtitle {
+  color: #aaaaaa;
+  font-size: 15px;
+}
+
+.product-section {
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.product-card {
+  background: #151515;
+  border: 1px solid #292929;
+  border-radius: 20px;
+  padding: 28px 20px;
+  text-align: center;
+}
+
+.product-icon {
+  font-size: 70px;
+  margin-bottom: 15px;
+}
+
+.product-title {
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.product-description {
+  color: #a8a8a8;
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+
+.offers-button {
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  padding: 15px 20px;
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #ffffff;
+  color: #000000;
+}
+
+.offers-button:active {
+  transform: scale(0.98);
+}
+
+.footer {
+  max-width: 500px;
+  margin: 40px auto 0;
+  text-align: center;
+  color: #666666;
+  font-size: 13px;
+}
+
+@media (max-width: 480px) {
+  .logo {
+    font-size: 26px;
+  }
+
+  .product-title {
+    font-size: 21px;
+  }
+
+  .product-icon {
+    font-size: 60px;
+  }
+}
