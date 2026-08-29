@@ -24,6 +24,9 @@ export default function CheckoutPage() {
     0
   );
 
+  const canContinue =
+    email.trim() !== "" && cart.length > 0;
+
   return (
     <main className="shop-container">
 
@@ -57,9 +60,7 @@ export default function CheckoutPage() {
           <input
             type="email"
             value={email}
-            onChange={(e) =>
-              setEmail(e.target.value)
-            }
+            onChange={(e) => setEmail(e.target.value)}
             placeholder="tu@email.com"
             className="checkout-input"
           />
@@ -94,6 +95,7 @@ export default function CheckoutPage() {
           )}
 
           <div className="checkout-total">
+
             <span>
               TOTAL
             </span>
@@ -101,15 +103,27 @@ export default function CheckoutPage() {
             <strong>
               {total.toFixed(2)} USDT
             </strong>
+
           </div>
 
-          <button
-            type="button"
-            className="offers-button"
-            disabled={!email || cart.length === 0}
-          >
-            CONTINUAR AL PAGO
-          </button>
+          {canContinue ? (
+            <Link
+              href="/payment"
+              className="offers-button"
+            >
+              CONTINUAR AL PAGO
+            </Link>
+          ) : (
+            <div
+              className="offers-button"
+              style={{
+                opacity: 0.4,
+                cursor: "not-allowed",
+              }}
+            >
+              CONTINUAR AL PAGO
+            </div>
+          )}
 
           <Link
             href="/cart"
