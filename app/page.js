@@ -1,13 +1,40 @@
 export default function Home() {
   return (
-    <main>
-      <h1>🎮 Qva🇨🇺CHOP 🛒</h1>
+    <main className="shop-container">
+      <header className="header">
+        <div className="logo">🎮 Qva🇨🇺CHOP 🛒</div>
 
-      <h2>💎 100 — 2200💎 Diamond Singapur</h2>
+        <p className="subtitle">
+          Tu tienda gaming rápida y segura
+        </p>
+      </header>
 
-      <p>Selecciona una oferta para continuar.</p>
+      <section className="product-section">
+        <div className="product-card">
+          <div className="product-icon">💎</div>
 
-      <button>Ver ofertas</button>
+          <h1 className="product-title">
+            100 — 2200💎
+          </h1>
+
+          <p className="diamond-label">
+            Diamond Singapur
+          </p>
+
+          <p className="product-description">
+            Selecciona la cantidad de diamantes que deseas
+            y continúa con tu compra.
+          </p>
+
+          <button className="offers-button">
+            🛒 Ver ofertas
+          </button>
+        </div>
+      </section>
+
+      <footer className="footer">
+        ⚡ Entrega rápida · 🛡️ Compra segura
+      </footer>
     </main>
   );
-}
+    }
