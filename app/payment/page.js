@@ -21,14 +21,20 @@ export default function PaymentPage() {
   }, []);
 
   const total = cart.reduce(
-    (sum, item) => sum + Number(item.price),
+    (sum, item) => sum + Number(item.price || 0),
     0
   );
 
   const walletAddress =
     process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS || "";
 
-  const copyAddress = async () => {
+  const qrUrl = walletAddress
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(
+        walletAddress
+      )}`
+    : "";
+
+  async function copyAddress() {
     if (!walletAddress) return;
 
     try {
@@ -39,9 +45,9 @@ export default function PaymentPage() {
         setCopied(false);
       }, 2000);
     } catch {
-      setCopied(false);
+      alert("No se pudo copiar la dirección.");
     }
-  };
+  }
 
   return (
     <main className="payment-page">
@@ -50,10 +56,7 @@ export default function PaymentPage() {
 
       <header className="checkout-header">
 
-        <Link
-          href="/"
-          className="checkout-logo"
-        >
+        <Link href="/" className="checkout-logo">
           🎮 Qva🇨🇺CHOP 🛒
         </Link>
 
@@ -69,44 +72,53 @@ export default function PaymentPage() {
 
         <div className="payment-main">
 
+          {/* TÍTULO */}
+
           <div className="checkout-heading">
 
             <p className="checkout-step">
-              PASO 2 DE 2
+              PAGO
             </p>
 
             <h1>
-              Realiza tu pago
+              Completa tu pago
             </h1>
 
             <p>
-              Envía exactamente el importe indicado
-              utilizando USDT en la red BEP-20.
+              Realiza el pago utilizando USDT en la
+              red BNB Smart Chain (BEP-20).
             </p>
 
           </div>
 
-          {/* MÉTODO DE PAGO */}
+          {/* IMPORTE */}
+
+          <section className="checkout-box payment-total-box">
+
+            <div>
+              <p className="payment-small-title">
+                TOTAL A PAGAR
+              </p>
+
+              <div className="payment-big-amount">
+                {total.toFixed(2)}
+                <span> USDT</span>
+              </div>
+            </div>
+
+            <div className="payment-network">
+              BEP-20
+            </div>
+
+          </section>
+
+          {/* MÉTODO */}
 
           <section className="checkout-box">
 
-            <div className="checkout-box-title">
-
-              <span className="checkout-number">
-                1
-              </span>
-
-              <div>
-                <h2>
-                  Método de pago
-                </h2>
-
-                <p>
-                  Red seleccionada
-                </p>
-              </div>
-
-            </div>
+            <h2 className="payment-section-title">
+              Método de pago
+            </h2>
 
             <div className="payment-method">
 
@@ -116,7 +128,7 @@ export default function PaymentPage() {
 
               <div>
                 <strong>
-                  USDT
+                  Tether USD (USDT)
                 </strong>
 
                 <span>
@@ -128,63 +140,38 @@ export default function PaymentPage() {
 
           </section>
 
-          {/* IMPORTE */}
+          {/* QR + DIRECCIÓN */}
 
           <section className="checkout-box">
 
-            <div className="checkout-box-title">
+            <h2 className="payment-section-title">
+              Realiza el pago
+            </h2>
 
-              <span className="checkout-number">
-                2
-              </span>
+            <p className="payment-text">
+              Escanea el código QR o copia la dirección
+              de la billetera.
+            </p>
 
-              <div>
-                <h2>
-                  Importe a pagar
-                </h2>
+            <div className="payment-qr-card">
 
-                <p>
-                  Envía exactamente esta cantidad.
-                </p>
-              </div>
-
-            </div>
-
-            <div className="payment-amount">
-
-              <span>
-                {total.toFixed(2)}
-              </span>
-
-              <strong>
-                USDT
-              </strong>
+              {qrUrl ? (
+                <img
+                  src={qrUrl}
+                  alt="QR de pago USDT BEP-20"
+                  className="payment-qr-image"
+                />
+              ) : (
+                <div className="qr-placeholder-large">
+                  QR
+                </div>
+              )}
 
             </div>
 
-          </section>
-
-          {/* DIRECCIÓN */}
-
-          <section className="checkout-box">
-
-            <div className="checkout-box-title">
-
-              <span className="checkout-number">
-                3
-              </span>
-
-              <div>
-                <h2>
-                  Dirección de pago
-                </h2>
-
-                <p>
-                  Envía USDT únicamente mediante BEP-20.
-                </p>
-              </div>
-
-            </div>
+            <p className="qr-caption">
+              Escanea para copiar la dirección de pago
+            </p>
 
             <div className="payment-address-box">
 
@@ -198,48 +185,15 @@ export default function PaymentPage() {
                 className="copy-button"
                 disabled={!walletAddress}
               >
-                {copied
-                  ? "✓ COPIADO"
-                  : "📋 COPIAR"}
+                {copied ? "✓ COPIADO" : "📋 COPIAR"}
               </button>
 
             </div>
 
             <div className="payment-warning">
-              ⚠️ Envía únicamente USDT mediante
-              la red BEP-20.
-            </div>
-
-          </section>
-
-          {/* QR */}
-
-          <section className="checkout-box">
-
-            <div className="checkout-box-title">
-
-              <span className="checkout-number">
-                4
-              </span>
-
-              <div>
-                <h2>
-                  Código QR
-                </h2>
-
-                <p>
-                  Escanea para realizar el pago.
-                </p>
-              </div>
-
-            </div>
-
-            <div className="payment-qr">
-
-              <div className="qr-placeholder-large">
-                QR
-              </div>
-
+              ⚠️ <strong>Importante:</strong> envía
+              únicamente USDT por la red BEP-20.
+              No utilices otra red.
             </div>
 
           </section>
@@ -248,24 +202,14 @@ export default function PaymentPage() {
 
           <section className="checkout-box">
 
-            <div className="checkout-box-title">
+            <h2 className="payment-section-title">
+              Confirmar el pago
+            </h2>
 
-              <span className="checkout-number">
-                5
-              </span>
-
-              <div>
-                <h2>
-                  Confirmar pago
-                </h2>
-
-                <p>
-                  Introduce el TX Hash después de
-                  realizar el pago.
-                </p>
-              </div>
-
-            </div>
+            <p className="payment-text">
+              Después de realizar el pago, introduce
+              aquí el TX Hash de tu transacción.
+            </p>
 
             <label className="checkout-label">
               TX Hash
@@ -274,10 +218,8 @@ export default function PaymentPage() {
             <input
               type="text"
               value={txHash}
-              onChange={(e) =>
-                setTxHash(e.target.value)
-              }
-              placeholder="Pega aquí el hash de la transacción"
+              onChange={(e) => setTxHash(e.target.value)}
+              placeholder="0x..."
               className="checkout-input"
             />
 
@@ -292,9 +234,16 @@ export default function PaymentPage() {
 
           </section>
 
+          <Link
+            href="/cart"
+            className="back-link"
+          >
+            ← Volver al carrito
+          </Link>
+
         </div>
 
-        {/* RESUMEN */}
+        {/* RESUMEN DEL PEDIDO */}
 
         <aside className="checkout-summary">
 
@@ -325,12 +274,24 @@ export default function PaymentPage() {
                 </span>
 
                 <strong>
-                  {Number(item.price).toFixed(2)}
+                  {Number(item.price || 0).toFixed(2)}
                 </strong>
 
               </div>
 
             ))}
+
+          </div>
+
+          <div className="summary-line">
+
+            <span>
+              Subtotal
+            </span>
+
+            <span>
+              {total.toFixed(2)} USDT
+            </span>
 
           </div>
 
@@ -353,10 +314,8 @@ export default function PaymentPage() {
             </div>
 
             <p>
-              Pago mediante USDT BEP-20.
-              <br />
-              Verifica siempre la dirección
-              antes de enviar.
+              Comprueba siempre que la dirección
+              y la red sean correctas antes de enviar.
             </p>
 
           </div>
@@ -367,4 +326,4 @@ export default function PaymentPage() {
 
     </main>
   );
-          }
+                }
