@@ -25,9 +25,12 @@ export default function PaymentPage() {
     0
   );
 
-  const walletAddress = "TU_DIRECCION_USDT_BEP20";
+  const walletAddress =
+    process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS || "";
 
   const copyAddress = async () => {
+    if (!walletAddress) return;
+
     try {
       await navigator.clipboard.writeText(walletAddress);
       setCopied(true);
@@ -60,13 +63,11 @@ export default function PaymentPage() {
 
       </header>
 
-      {/* CONTENT */}
+      {/* CONTENIDO */}
 
       <div className="payment-container">
 
         <div className="payment-main">
-
-          {/* TITLE */}
 
           <div className="checkout-heading">
 
@@ -85,7 +86,7 @@ export default function PaymentPage() {
 
           </div>
 
-          {/* PAYMENT METHOD */}
+          {/* MÉTODO DE PAGO */}
 
           <section className="checkout-box">
 
@@ -127,7 +128,7 @@ export default function PaymentPage() {
 
           </section>
 
-          {/* AMOUNT */}
+          {/* IMPORTE */}
 
           <section className="checkout-box">
 
@@ -150,6 +151,7 @@ export default function PaymentPage() {
             </div>
 
             <div className="payment-amount">
+
               <span>
                 {total.toFixed(2)}
               </span>
@@ -157,11 +159,12 @@ export default function PaymentPage() {
               <strong>
                 USDT
               </strong>
+
             </div>
 
           </section>
 
-          {/* ADDRESS */}
+          {/* DIRECCIÓN */}
 
           <section className="checkout-box">
 
@@ -186,22 +189,25 @@ export default function PaymentPage() {
             <div className="payment-address-box">
 
               <code>
-                {walletAddress}
+                {walletAddress || "Dirección no configurada"}
               </code>
 
               <button
                 type="button"
                 onClick={copyAddress}
                 className="copy-button"
+                disabled={!walletAddress}
               >
-                {copied ? "✓ COPIADO" : "📋 COPIAR"}
+                {copied
+                  ? "✓ COPIADO"
+                  : "📋 COPIAR"}
               </button>
 
             </div>
 
             <div className="payment-warning">
-              ⚠️ No envíes fondos desde otra red.
-              El pago debe realizarse mediante BEP-20.
+              ⚠️ Envía únicamente USDT mediante
+              la red BEP-20.
             </div>
 
           </section>
@@ -254,8 +260,8 @@ export default function PaymentPage() {
                 </h2>
 
                 <p>
-                  Introduce el TX Hash después de realizar
-                  el pago.
+                  Introduce el TX Hash después de
+                  realizar el pago.
                 </p>
               </div>
 
@@ -288,7 +294,7 @@ export default function PaymentPage() {
 
         </div>
 
-        {/* ORDER SUMMARY */}
+        {/* RESUMEN */}
 
         <aside className="checkout-summary">
 
@@ -349,7 +355,8 @@ export default function PaymentPage() {
             <p>
               Pago mediante USDT BEP-20.
               <br />
-              No compartas tu TX Hash con terceros.
+              Verifica siempre la dirección
+              antes de enviar.
             </p>
 
           </div>
@@ -360,4 +367,4 @@ export default function PaymentPage() {
 
     </main>
   );
-            }
+          }
