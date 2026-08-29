@@ -1,3 +1,8 @@
+/* =========================================
+   Qva🇨🇺CHOP 🛒
+   GLOBAL STYLES
+   ========================================= */
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -17,6 +22,7 @@ body {
 
 a {
   color: inherit;
+  text-decoration: none;
 }
 
 button,
@@ -24,9 +30,9 @@ input {
   font-family: inherit;
 }
 
-/* =========================
-   🛒 CARRITO SUPERIOR
-   ========================= */
+/* =========================================
+   🛒 CARRITO
+   ========================================= */
 
 .cart-icon {
   position: fixed;
@@ -45,7 +51,6 @@ input {
   border: 1px solid #333333;
   border-radius: 14px;
 
-  text-decoration: none;
   font-size: 24px;
 
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.35);
@@ -78,9 +83,9 @@ input {
   font-weight: 800;
 }
 
-/* =========================
-   🏠 TIENDA
-   ========================= */
+/* =========================================
+   🏠 PÁGINA PRINCIPAL
+   ========================================= */
 
 .shop-container {
   min-height: 100vh;
@@ -111,7 +116,6 @@ input {
 
 .product-link {
   display: block;
-  text-decoration: none;
 }
 
 .store-product {
@@ -164,9 +168,9 @@ input {
   font-size: 14px;
 }
 
-/* =========================
+/* =========================================
    💎 OFERTAS
-   ========================= */
+   ========================================= */
 
 .product-section {
   max-width: 500px;
@@ -288,7 +292,6 @@ input {
   background: #ffffff;
   color: #000000;
 
-  text-decoration: none;
   text-align: center;
 }
 
@@ -308,14 +311,12 @@ input {
 
   color: #999999;
 
-  text-decoration: none;
-
   font-size: 14px;
 }
 
-/* =========================
+/* =========================================
    🛒 CARRITO
-   ========================= */
+   ========================================= */
 
 .cart-list {
   display: flex;
@@ -388,16 +389,16 @@ input {
   font-size: 20px;
 }
 
-/* =========================
-   💳 CHECKOUT
-   ========================= */
+/* =========================================
+   🧾 CHECKOUT
+   ========================================= */
 
 .checkout-page {
   min-height: 100vh;
 
   background: #080808;
 
-  padding: 90px 16px 50px;
+  padding: 80px 16px 50px;
 }
 
 .checkout-header {
@@ -413,8 +414,6 @@ input {
 }
 
 .checkout-logo {
-  text-decoration: none;
-
   font-size: 24px;
   font-weight: 800;
 }
@@ -453,10 +452,10 @@ input {
 .checkout-step {
   color: #777777;
 
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 800;
 
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
 
   margin-bottom: 8px;
 }
@@ -471,6 +470,7 @@ input {
   color: #999999;
 
   font-size: 14px;
+  line-height: 1.5;
 }
 
 .checkout-box {
@@ -647,14 +647,12 @@ input {
 
   text-align: center;
 
-  text-decoration: none;
-
   font-size: 14px;
 }
 
-/* =========================
-   📋 RESUMEN LATERAL
-   ========================= */
+/* =========================================
+   📋 RESUMEN
+   ========================================= */
 
 .checkout-summary {
   position: sticky;
@@ -761,16 +759,17 @@ input {
 
   padding: 15px 17px;
 
+  border: none;
   border-radius: 11px;
 
   background: #ffffff;
 
   color: #000000;
 
-  text-decoration: none;
-
   font-size: 14px;
   font-weight: 800;
+
+  cursor: pointer;
 }
 
 .checkout-primary-button span {
@@ -801,9 +800,360 @@ input {
   line-height: 1.5;
 }
 
-/* =========================
-   FOOTER
-   ========================= */
+/* =========================================
+   💳 PAYMENT
+   ========================================= */
+
+.payment-page {
+  min-height: 100vh;
+
+  background: #080808;
+
+  color: #ffffff;
+
+  padding: 80px 16px 50px;
+}
+
+.payment-container {
+  max-width: 1050px;
+
+  margin: 0 auto;
+
+  display: grid;
+
+  grid-template-columns:
+    minmax(0, 1fr)
+    360px;
+
+  gap: 28px;
+
+  align-items: start;
+}
+
+.payment-main {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 16px;
+}
+
+.payment-main .checkout-heading {
+  margin-bottom: 8px;
+}
+
+.payment-main .checkout-heading h1 {
+  font-size: 32px;
+
+  margin-bottom: 8px;
+}
+
+.payment-main .checkout-heading > p:last-child {
+  color: #999999;
+
+  font-size: 14px;
+
+  line-height: 1.5;
+}
+
+/* =========================================
+   💰 TOTAL PAYMENT
+   ========================================= */
+
+.payment-total-box {
+  display: flex;
+
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 20px;
+}
+
+.payment-small-title {
+  color: #777777;
+
+  font-size: 11px;
+  font-weight: 800;
+
+  letter-spacing: 1px;
+
+  margin-bottom: 7px;
+}
+
+.payment-big-amount {
+  font-size: 34px;
+
+  font-weight: 800;
+
+  line-height: 1;
+}
+
+.payment-big-amount span {
+  color: #999999;
+
+  font-size: 16px;
+
+  font-weight: 700;
+}
+
+.payment-network {
+  padding: 8px 11px;
+
+  border-radius: 8px;
+
+  background: #222222;
+
+  border: 1px solid #333333;
+
+  color: #dddddd;
+
+  font-size: 11px;
+
+  font-weight: 800;
+}
+
+/* =========================================
+   💳 PAYMENT SECTIONS
+   ========================================= */
+
+.payment-section-title {
+  font-size: 17px;
+
+  margin-bottom: 8px;
+}
+
+.payment-text {
+  color: #888888;
+
+  font-size: 13px;
+
+  line-height: 1.5;
+
+  margin-bottom: 16px;
+}
+
+/* =========================================
+   🪙 PAYMENT METHOD
+   ========================================= */
+
+.payment-method {
+  display: flex;
+
+  align-items: center;
+
+  gap: 13px;
+
+  padding: 13px;
+
+  border-radius: 12px;
+
+  background: #0d0d0d;
+
+  border: 1px solid #292929;
+}
+
+.payment-method-icon {
+  width: 44px;
+  height: 44px;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 10px;
+
+  background: #181818;
+
+  font-size: 22px;
+}
+
+.payment-method div:last-child {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 4px;
+}
+
+.payment-method strong {
+  font-size: 14px;
+}
+
+.payment-method span {
+  color: #777777;
+
+  font-size: 12px;
+}
+
+/* =========================================
+   ▣ QR
+   ========================================= */
+
+.payment-qr-card {
+  width: 260px;
+  height: 260px;
+
+  margin: 20px auto 10px;
+
+  padding: 12px;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  background: #ffffff;
+
+  border-radius: 14px;
+}
+
+.payment-qr-image {
+  width: 100%;
+  height: 100%;
+
+  object-fit: contain;
+
+  display: block;
+}
+
+.qr-placeholder-large {
+  width: 100%;
+  height: 100%;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  background: #eeeeee;
+
+  color: #111111;
+
+  font-size: 30px;
+
+  font-weight: 800;
+}
+
+.qr-caption {
+  color: #777777;
+
+  text-align: center;
+
+  font-size: 12px;
+
+  margin-bottom: 14px;
+}
+
+/* =========================================
+   📋 DIRECCIÓN
+   ========================================= */
+
+.payment-address-box {
+  display: flex;
+
+  align-items: stretch;
+
+  gap: 8px;
+
+  width: 100%;
+}
+
+.payment-address-box code {
+  min-width: 0;
+
+  flex: 1;
+
+  display: flex;
+
+  align-items: center;
+
+  padding: 13px;
+
+  background: #0b0b0b;
+
+  border: 1px solid #333333;
+
+  border-radius: 10px;
+
+  color: #cccccc;
+
+  font-family: monospace;
+
+  font-size: 11px;
+
+  overflow-wrap: anywhere;
+}
+
+.copy-button {
+  flex-shrink: 0;
+
+  border: 1px solid #444444;
+
+  border-radius: 10px;
+
+  background: #202020;
+
+  color: #ffffff;
+
+  padding: 0 14px;
+
+  font-size: 12px;
+
+  font-weight: 800;
+
+  cursor: pointer;
+}
+
+.copy-button:active {
+  transform: scale(0.97);
+}
+
+.copy-button:disabled {
+  opacity: 0.4;
+
+  cursor: not-allowed;
+}
+
+/* =========================================
+   ⚠️ ADVERTENCIA
+   ========================================= */
+
+.payment-warning {
+  margin-top: 14px;
+
+  padding: 13px;
+
+  border-radius: 10px;
+
+  background: #171717;
+
+  border: 1px solid #333333;
+
+  color: #999999;
+
+  font-size: 12px;
+
+  line-height: 1.5;
+}
+
+/* =========================================
+   🔍 VERIFICAR
+   ========================================= */
+
+.payment-submit {
+  margin-top: 15px;
+}
+
+.payment-submit:disabled {
+  opacity: 0.35;
+
+  cursor: not-allowed;
+}
+
+/* =========================================
+   🦶 FOOTER
+   ========================================= */
 
 .footer {
   max-width: 520px;
@@ -817,27 +1167,38 @@ input {
   font-size: 13px;
 }
 
-/* =========================
-   📱 MÓVIL
-   ========================= */
+/* =========================================
+   📱 TABLET / MÓVIL
+   ========================================= */
 
 @media (max-width: 800px) {
+
   .checkout-container {
     grid-template-columns: 1fr;
   }
 
   .checkout-summary {
     position: static;
+  }
 
+  .payment-container {
+    grid-template-columns: 1fr;
+  }
+
+  .payment-container .checkout-summary {
     order: -1;
+
+    position: static;
   }
 
-  .checkout-header {
-    align-items: flex-start;
-  }
 }
 
+/* =========================================
+   📱 TELÉFONOS
+   ========================================= */
+
 @media (max-width: 480px) {
+
   .shop-container {
     padding: 80px 12px 35px;
   }
@@ -870,7 +1231,7 @@ input {
   }
 
   .checkout-page {
-    padding: 80px 12px 35px;
+    padding: 75px 12px 35px;
   }
 
   .checkout-header {
@@ -900,4 +1261,30 @@ input {
   .checkout-product-price {
     font-size: 13px;
   }
-}
+
+  .payment-page {
+    padding: 75px 12px 40px;
+  }
+
+  .payment-main .checkout-heading h1 {
+    font-size: 27px;
+  }
+
+  .payment-big-amount {
+    font-size: 30px;
+  }
+
+  .payment-qr-card {
+    width: 230px;
+    height: 230px;
+  }
+
+  .payment-address-box {
+    flex-direction: column;
+  }
+
+  .copy-button {
+    min-height: 46px;
+  }
+
+  }
