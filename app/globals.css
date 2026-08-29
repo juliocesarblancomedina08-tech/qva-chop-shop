@@ -85,6 +85,7 @@ button {
   border: none;
   border-radius: 12px;
   padding: 15px 20px;
+  margin-top: 10px;
   font-size: 17px;
   font-weight: 700;
   cursor: pointer;
@@ -160,6 +161,10 @@ button {
   cursor: not-allowed;
 }
 
+.cart-button {
+  margin-top: 12px;
+}
+
 .back-link {
   display: block;
   margin-top: 18px;
@@ -170,6 +175,66 @@ button {
 
 .back-link:hover {
   color: #ffffff;
+}
+
+/* 🛒 CARRITO */
+
+.cart-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.cart-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #0d0d0d;
+  border: 1px solid #292929;
+  text-align: left;
+}
+
+.cart-item strong {
+  font-size: 16px;
+}
+
+.cart-item p {
+  margin-top: 6px;
+  color: #999999;
+  font-size: 14px;
+}
+
+.remove-button {
+  border: 1px solid #333333;
+  background: #171717;
+  color: #ffffff;
+  border-radius: 10px;
+  padding: 9px 11px;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.remove-button:active {
+  transform: scale(0.95);
+}
+
+.cart-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20px 0;
+  padding: 16px 0;
+  border-top: 1px solid #292929;
+  border-bottom: 1px solid #292929;
+  font-size: 18px;
+}
+
+.cart-total strong {
+  font-size: 20px;
 }
 
 .footer {
