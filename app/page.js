@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <main className="shop-container">
@@ -26,9 +28,9 @@ export default function Home() {
             y continúa con tu compra.
           </p>
 
-          <button className="offers-button">
-            🛒 Ver ofertas
-          </button>
+          <Link href="/offers" className="offers-button">
+            🛒 VER OFERTAS
+          </Link>
         </div>
       </section>
 
@@ -37,4 +39,4 @@ export default function Home() {
       </footer>
     </main>
   );
-    }
+}
