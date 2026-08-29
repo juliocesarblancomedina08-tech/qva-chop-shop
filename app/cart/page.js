@@ -10,7 +10,11 @@ export default function CartPage() {
     const savedCart = localStorage.getItem("qva_cart");
 
     if (savedCart) {
-      setCart(JSON.parse(savedCart));
+      try {
+        setCart(JSON.parse(savedCart));
+      } catch {
+        setCart([]);
+      }
     }
   }, []);
 
@@ -18,17 +22,26 @@ export default function CartPage() {
     const newCart = cart.filter((_, i) => i !== index);
 
     setCart(newCart);
-    localStorage.setItem("qva_cart", JSON.stringify(newCart));
+
+    localStorage.setItem(
+      "qva_cart",
+      JSON.stringify(newCart)
+    );
+
+    window.dispatchEvent(new Event("cartUpdated"));
   };
 
   const total = cart.reduce((sum, item) => {
-    return sum + item.price;
+    return sum + Number(item.price);
   }, 0);
 
   return (
     <main className="shop-container">
+
       <header className="header">
-        <div className="logo">🎮 Qva🇨🇺CHOP 🛒</div>
+        <div className="logo">
+          🎮 Qva🇨🇺CHOP 🛒
+        </div>
 
         <p className="subtitle">
           🛒 Tu carrito
@@ -36,6 +49,7 @@ export default function CartPage() {
       </header>
 
       <section className="product-section">
+
         <div className="product-card">
 
           <h1 className="product-title">
@@ -49,27 +63,29 @@ export default function CartPage() {
               </p>
 
               <Link
-                href="/offers"
+                href="/"
                 className="offers-button"
               >
-                💎 VER OFERTAS
+                🏠 IR A LA TIENDA
               </Link>
             </>
           ) : (
             <>
               <div className="cart-list">
+
                 {cart.map((item, index) => (
                   <div
                     className="cart-item"
                     key={`${item.diamonds}-${index}`}
                   >
+
                     <div>
                       <strong>
-                        💎 {item.diamonds}
+                        💎 {item.diamonds} Diamonds
                       </strong>
 
                       <p>
-                        {item.price.toFixed(2)} USDT
+                        {Number(item.price).toFixed(2)} USDT
                       </p>
                     </div>
 
@@ -80,39 +96,49 @@ export default function CartPage() {
                     >
                       🗑️
                     </button>
+
                   </div>
                 ))}
+
               </div>
 
               <div className="cart-total">
-                <span>Total</span>
+
+                <span>
+                  Total
+                </span>
 
                 <strong>
                   {total.toFixed(2)} USDT
                 </strong>
+
               </div>
 
               <Link
                 href="/checkout"
                 className="offers-button"
               >
-                💳 CONTINUAR AL CHECKOUT
+                💳 CHECKOUT
               </Link>
 
               <Link
-                href="/offers"
+                href="/"
                 className="back-link"
               >
                 ← Seguir comprando
               </Link>
+
             </>
           )}
+
         </div>
+
       </section>
 
       <footer className="footer">
         ⚡ Entrega rápida · 🛡️ Compra segura
       </footer>
+
     </main>
   );
-    }
+                  }
