@@ -19,13 +19,14 @@ a {
   color: inherit;
 }
 
-button {
+button,
+input {
   font-family: inherit;
 }
 
 .shop-container {
   min-height: 100vh;
-  padding: 90px 16px 40px;
+  padding: 85px 16px 40px;
 }
 
 /* =========================
@@ -122,10 +123,7 @@ button {
   background: #151515;
   border: 1px solid #292929;
   border-radius: 18px;
-
-  transition:
-    transform 0.15s ease,
-    border-color 0.15s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease;
 }
 
 .store-product:hover {
@@ -206,11 +204,9 @@ button {
 
 .offer-item {
   width: 100%;
-
   display: flex;
   align-items: center;
   justify-content: space-between;
-
   gap: 15px;
 
   padding: 16px 18px;
@@ -244,14 +240,10 @@ button {
 
 .selected-offer {
   margin: 0 0 18px;
-
   padding: 14px;
-
   border-radius: 12px;
-
   background: #111111;
   border: 1px solid #333333;
-
   text-align: center;
 }
 
@@ -267,7 +259,6 @@ button {
 
 .offers-button {
   width: 100%;
-
   display: block;
 
   border: none;
@@ -297,19 +288,11 @@ button {
   cursor: not-allowed;
 }
 
-.cart-button {
-  margin-top: 12px;
-}
-
 .back-link {
   display: block;
-
   margin-top: 18px;
-
   color: #999999;
-
   text-decoration: none;
-
   font-size: 14px;
 }
 
@@ -328,7 +311,6 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-
   gap: 15px;
 
   padding: 16px;
@@ -347,24 +329,19 @@ button {
 
 .cart-item p {
   margin-top: 6px;
-
   color: #999999;
-
   font-size: 14px;
 }
 
 .remove-button {
   border: 1px solid #333333;
-
   background: #171717;
   color: #ffffff;
 
   border-radius: 10px;
-
   padding: 9px 11px;
 
   cursor: pointer;
-
   font-size: 16px;
 }
 
@@ -378,7 +355,6 @@ button {
   justify-content: space-between;
 
   margin: 20px 0;
-
   padding: 16px 0;
 
   border-top: 1px solid #292929;
@@ -392,28 +368,138 @@ button {
 }
 
 /* =========================
+   💳 CHECKOUT
+   ========================= */
+
+.checkout-section {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.checkout-card {
+  background: #151515;
+  border: 1px solid #292929;
+  border-radius: 20px;
+  padding: 24px 20px;
+}
+
+.checkout-title {
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.checkout-description {
+  color: #999999;
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+
+.checkout-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.checkout-input {
+  width: 100%;
+  height: 50px;
+
+  padding: 0 14px;
+
+  background: #0d0d0d;
+  color: #ffffff;
+
+  border: 1px solid #333333;
+  border-radius: 12px;
+
+  outline: none;
+  font-size: 16px;
+
+  margin-bottom: 28px;
+}
+
+.checkout-input:focus {
+  border-color: #777777;
+}
+
+.checkout-subtitle {
+  font-size: 18px;
+  margin-bottom: 14px;
+}
+
+.checkout-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.checkout-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 12px;
+
+  padding: 14px;
+
+  background: #0d0d0d;
+  border: 1px solid #292929;
+  border-radius: 12px;
+
+  font-size: 14px;
+}
+
+.checkout-item strong {
+  white-space: nowrap;
+}
+
+.checkout-empty {
+  color: #888888;
+  font-size: 14px;
+  padding: 14px 0;
+}
+
+.checkout-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  margin-top: 20px;
+  padding: 18px 0;
+
+  border-top: 1px solid #333333;
+
+  font-size: 17px;
+}
+
+.checkout-total strong {
+  font-size: 20px;
+}
+
+/* =========================
    FOOTER
    ========================= */
 
 .footer {
   max-width: 520px;
-
   margin: 40px auto 0;
 
   text-align: center;
 
   color: #666666;
-
   font-size: 13px;
 }
 
 /* =========================
-   MÓVIL
+   📱 MÓVIL
    ========================= */
 
 @media (max-width: 480px) {
   .shop-container {
-    padding: 85px 12px 35px;
+    padding: 80px 12px 35px;
   }
 
   .logo {
@@ -440,5 +526,13 @@ button {
   .cart-icon {
     top: 14px;
     right: 14px;
+  }
+
+  .checkout-card {
+    padding: 22px 16px;
+  }
+
+  .checkout-title {
+    font-size: 22px;
   }
   }
