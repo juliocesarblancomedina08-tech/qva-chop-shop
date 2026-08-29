@@ -1,4 +1,5 @@
 import "./globals.css";
+import CartButton from "./CartButton";
 
 export const metadata = {
   title: "Qva🇨🇺CHOP 🛒",
@@ -8,7 +9,10 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body>
+        <CartButton />
+        {children}
+      </body>
     </html>
   );
 }
