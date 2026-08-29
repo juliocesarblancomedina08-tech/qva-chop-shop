@@ -1,3 +1,8 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+
 const offers = [
   {
     diamonds: "100 💎",
@@ -22,6 +27,8 @@ const offers = [
 ];
 
 export default function OffersPage() {
+  const [selectedOffer, setSelectedOffer] = useState(null);
+
   return (
     <main className="shop-container">
       <header className="header">
@@ -45,20 +52,50 @@ export default function OffersPage() {
           </p>
 
           <div className="offers-list">
-            {offers.map((offer) => (
-              <button
-                key={offer.diamonds}
-                className="offer-item"
-              >
-                <span>✏️ {offer.diamonds}</span>
-                <strong>{offer.price}</strong>
-              </button>
-            ))}
+            {offers.map((offer) => {
+              const isSelected =
+                selectedOffer?.diamonds === offer.diamonds;
+
+              return (
+                <button
+                  key={offer.diamonds}
+                  type="button"
+                  onClick={() => setSelectedOffer(offer)}
+                  className={`offer-item ${
+                    isSelected ? "offer-selected" : ""
+                  }`}
+                >
+                  <span>
+                    {isSelected ? "✅" : "✏️"} {offer.diamonds}
+                  </span>
+
+                  <strong>{offer.price}</strong>
+                </button>
+              );
+            })}
           </div>
 
-          <button className="offers-button">
-            🛒 Añadir al carrito
+          {selectedOffer && (
+            <div className="selected-offer">
+              <p>Oferta seleccionada:</p>
+
+              <strong>
+                {selectedOffer.diamonds} — {selectedOffer.price}
+              </strong>
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="offers-button"
+            disabled={!selectedOffer}
+          >
+            🛒 AÑADIR AL CARRITO
           </button>
+
+          <Link href="/" className="back-link">
+            ← Volver
+          </Link>
         </div>
       </section>
 
@@ -67,4 +104,4 @@ export default function OffersPage() {
       </footer>
     </main>
   );
-    }
+                    }
