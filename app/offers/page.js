@@ -49,13 +49,17 @@ export default function OffersPage() {
       JSON.stringify(newCart)
     );
 
+    window.dispatchEvent(new Event("cartUpdated"));
+
     setAdded(true);
   };
 
   return (
     <main className="shop-container">
       <header className="header">
-        <div className="logo">🎮 Qva🇨🇺CHOP 🛒</div>
+        <div className="logo">
+          🎮 Qva🇨🇺CHOP 🛒
+        </div>
 
         <p className="subtitle">
           💎 Diamond Singapur
@@ -70,11 +74,11 @@ export default function OffersPage() {
           </div>
 
           <h1 className="product-title">
-            Selecciona tu oferta
+            Diamonds Singapur
           </h1>
 
           <p className="product-description">
-            Elige la cantidad de diamantes que deseas comprar.
+            Selecciona la cantidad de diamantes que deseas comprar.
           </p>
 
           <div className="offers-list">
@@ -91,11 +95,13 @@ export default function OffersPage() {
                     setAdded(false);
                   }}
                   className={`offer-item ${
-                    isSelected ? "offer-selected" : ""
+                    isSelected
+                      ? "offer-selected"
+                      : ""
                   }`}
                 >
                   <span>
-                    {isSelected ? "✅" : "✏️"}{" "}
+                    {isSelected ? "✅" : "💎"}{" "}
                     {offer.diamonds} 💎
                   </span>
 
@@ -109,7 +115,9 @@ export default function OffersPage() {
 
           {selectedOffer && (
             <div className="selected-offer">
-              <p>Oferta seleccionada:</p>
+              <p>
+                Oferta seleccionada:
+              </p>
 
               <strong>
                 💎 {selectedOffer.diamonds} —{" "}
@@ -128,19 +136,22 @@ export default function OffersPage() {
           </button>
 
           {added && (
-            <Link
-              href="/cart"
-              className="offers-button cart-button"
+            <p
+              style={{
+                marginTop: "14px",
+                color: "#aaaaaa",
+                fontSize: "14px",
+              }}
             >
-              ✅ VER CARRITO
-            </Link>
+              ✅ Añadido al carrito
+            </p>
           )}
 
           <Link
             href="/"
             className="back-link"
           >
-            ← Volver
+            ← Volver a la tienda
           </Link>
 
         </div>
@@ -151,4 +162,4 @@ export default function OffersPage() {
       </footer>
     </main>
   );
-    }
+    }      
