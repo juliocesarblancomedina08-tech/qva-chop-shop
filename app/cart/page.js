@@ -7,15 +7,27 @@ export default function CartPage() {
   const [cart, setCart] = useState([]);
 
   useEffect(() => {
-    const savedCart = localStorage.getItem("qva_cart");
+    const loadCart = () => {
+      const savedCart = localStorage.getItem("qva_cart");
 
-    if (savedCart) {
-      try {
-        setCart(JSON.parse(savedCart));
-      } catch {
+      if (savedCart) {
+        try {
+          setCart(JSON.parse(savedCart));
+        } catch {
+          setCart([]);
+        }
+      } else {
         setCart([]);
       }
-    }
+    };
+
+    loadCart();
+
+    window.addEventListener("cartUpdated", loadCart);
+
+    return () => {
+      window.removeEventListener("cartUpdated", loadCart);
+    };
   }, []);
 
   const removeItem = (index) => {
@@ -28,12 +40,15 @@ export default function CartPage() {
       JSON.stringify(newCart)
     );
 
-    window.dispatchEvent(new Event("cartUpdated"));
+    window.dispatchEvent(
+      new Event("cartUpdated")
+    );
   };
 
-  const total = cart.reduce((sum, item) => {
-    return sum + Number(item.price);
-  }, 0);
+  const total = cart.reduce(
+    (sum, item) => sum + Number(item.price),
+    0
+  );
 
   return (
     <main className="shop-container">
@@ -44,7 +59,7 @@ export default function CartPage() {
         </div>
 
         <p className="subtitle">
-          🛒 Tu carrito
+          🛒 Carrito de compra
         </p>
       </header>
 
@@ -53,7 +68,7 @@ export default function CartPage() {
         <div className="product-card">
 
           <h1 className="product-title">
-            🛒 Carrito
+            🛒 Tu carrito
           </h1>
 
           {cart.length === 0 ? (
@@ -66,7 +81,7 @@ export default function CartPage() {
                 href="/"
                 className="offers-button"
               >
-                🏠 IR A LA TIENDA
+                🛍️ IR A LA TIENDA
               </Link>
             </>
           ) : (
@@ -92,7 +107,9 @@ export default function CartPage() {
                     <button
                       type="button"
                       className="remove-button"
-                      onClick={() => removeItem(index)}
+                      onClick={() =>
+                        removeItem(index)
+                      }
                     >
                       🗑️
                     </button>
@@ -105,7 +122,7 @@ export default function CartPage() {
               <div className="cart-total">
 
                 <span>
-                  Total
+                  TOTAL
                 </span>
 
                 <strong>
@@ -118,7 +135,7 @@ export default function CartPage() {
                 href="/checkout"
                 className="offers-button"
               >
-                💳 CHECKOUT
+                CHECKOUT
               </Link>
 
               <Link
@@ -141,4 +158,4 @@ export default function CartPage() {
 
     </main>
   );
-                  }
+    }
