@@ -65,6 +65,14 @@ button {
   margin-bottom: 10px;
 }
 
+.diamond-label {
+  color: #bbbbbb;
+  font-size: 14px;
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
 .product-description {
   color: #a8a8a8;
   line-height: 1.5;
@@ -84,6 +92,39 @@ button {
 }
 
 .offers-button:active {
+  transform: scale(0.98);
+}
+
+.offers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.offer-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 16px 18px;
+  border: 1px solid #292929;
+  border-radius: 14px;
+  background: #0d0d0d;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.offer-item strong {
+  white-space: nowrap;
+  font-size: 15px;
+}
+
+.offer-item:active {
   transform: scale(0.98);
 }
 
@@ -107,4 +148,17 @@ button {
   .product-icon {
     font-size: 60px;
   }
+
+  .offer-item {
+    padding: 15px;
+    font-size: 15px;
+  }
 }
+
+Importante: este bloque es solo para "app/globals.css". No lo pegues en "page.js" ni en "layout.js".
+
+Después haz Commit changes con:
+
+Add complete shop styles
+
+y deja marcado Commit directly to the main branch.
