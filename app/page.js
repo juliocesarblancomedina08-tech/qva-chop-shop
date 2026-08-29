@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 export default function Home() {
@@ -7,31 +8,38 @@ export default function Home() {
         <div className="logo">🎮 Qva🇨🇺CHOP 🛒</div>
 
         <p className="subtitle">
-          Tu tienda gaming rápida y segura
+          Tu tienda gaming
         </p>
       </header>
 
-      <section className="product-section">
-        <div className="product-card">
-          <div className="product-icon">💎</div>
+      <section className="products-section">
+        <Link
+          href="/offers"
+          className="product-link"
+        >
+          <article className="store-product">
 
-          <h1 className="product-title">
-            100 — 2200💎
-          </h1>
+            <div className="product-image">
+              <Image
+                src="/Images.jpeg"
+                alt="Diamonds Singapur"
+                fill
+                sizes="(max-width: 600px) 100vw, 500px"
+              />
+            </div>
 
-          <p className="diamond-label">
-            Diamond Singapur
-          </p>
+            <div className="store-product-info">
+              <h1>
+                💎 100 — 2200💎
+              </h1>
 
-          <p className="product-description">
-            Selecciona la cantidad de diamantes que deseas
-            y continúa con tu compra.
-          </p>
+              <p>
+                Diamonds Singapur
+              </p>
+            </div>
 
-          <Link href="/offers" className="offers-button">
-            🛒 VER OFERTAS
-          </Link>
-        </div>
+          </article>
+        </Link>
       </section>
 
       <footer className="footer">
