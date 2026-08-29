@@ -5,29 +5,52 @@ import Link from "next/link";
 
 const offers = [
   {
-    diamonds: "100 💎",
-    price: "1.01 USDT",
+    diamonds: "100",
+    price: 1.01,
   },
   {
-    diamonds: "210 💎",
-    price: "2.00 USDT",
+    diamonds: "210",
+    price: 2.0,
   },
   {
-    diamonds: "530 💎",
-    price: "5.00 USDT",
+    diamonds: "530",
+    price: 5.0,
   },
   {
-    diamonds: "1080 💎",
-    price: "10.00 USDT",
+    diamonds: "1080",
+    price: 10.0,
   },
   {
-    diamonds: "2200 💎",
-    price: "20.00 USDT",
+    diamonds: "2200",
+    price: 20.0,
   },
 ];
 
 export default function OffersPage() {
   const [selectedOffer, setSelectedOffer] = useState(null);
+  const [added, setAdded] = useState(false);
+
+  const addToCart = () => {
+    if (!selectedOffer) return;
+
+    const savedCart = localStorage.getItem("qva_cart");
+
+    const currentCart = savedCart
+      ? JSON.parse(savedCart)
+      : [];
+
+    const newCart = [
+      ...currentCart,
+      selectedOffer,
+    ];
+
+    localStorage.setItem(
+      "qva_cart",
+      JSON.stringify(newCart)
+    );
+
+    setAdded(true);
+  };
 
   return (
     <main className="shop-container">
@@ -41,7 +64,10 @@ export default function OffersPage() {
 
       <section className="product-section">
         <div className="product-card">
-          <div className="product-icon">💎</div>
+
+          <div className="product-icon">
+            💎
+          </div>
 
           <h1 className="product-title">
             Selecciona tu oferta
@@ -60,16 +86,22 @@ export default function OffersPage() {
                 <button
                   key={offer.diamonds}
                   type="button"
-                  onClick={() => setSelectedOffer(offer)}
+                  onClick={() => {
+                    setSelectedOffer(offer);
+                    setAdded(false);
+                  }}
                   className={`offer-item ${
                     isSelected ? "offer-selected" : ""
                   }`}
                 >
                   <span>
-                    {isSelected ? "✅" : "✏️"} {offer.diamonds}
+                    {isSelected ? "✅" : "✏️"}{" "}
+                    {offer.diamonds} 💎
                   </span>
 
-                  <strong>{offer.price}</strong>
+                  <strong>
+                    {offer.price.toFixed(2)} USDT
+                  </strong>
                 </button>
               );
             })}
@@ -80,7 +112,8 @@ export default function OffersPage() {
               <p>Oferta seleccionada:</p>
 
               <strong>
-                {selectedOffer.diamonds} — {selectedOffer.price}
+                💎 {selectedOffer.diamonds} —{" "}
+                {selectedOffer.price.toFixed(2)} USDT
               </strong>
             </div>
           )}
@@ -89,13 +122,27 @@ export default function OffersPage() {
             type="button"
             className="offers-button"
             disabled={!selectedOffer}
+            onClick={addToCart}
           >
             🛒 AÑADIR AL CARRITO
           </button>
 
-          <Link href="/" className="back-link">
+          {added && (
+            <Link
+              href="/cart"
+              className="offers-button cart-button"
+            >
+              ✅ VER CARRITO
+            </Link>
+          )}
+
+          <Link
+            href="/"
+            className="back-link"
+          >
             ← Volver
           </Link>
+
         </div>
       </section>
 
@@ -104,4 +151,4 @@ export default function OffersPage() {
       </footer>
     </main>
   );
-                    }
+    }
