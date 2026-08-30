@@ -42,8 +42,8 @@ export async function POST(request) {
     }
 
     /*
-     * Si ya fue entregado, devolvemos el resultado
-     * sin volver a entregar otro código.
+     * Si el pedido ya fue entregado, devolvemos
+     * los códigos sin volver a entregarlos.
      */
     if (order.status === "delivered") {
       const deliveredCodes = await db
@@ -68,13 +68,15 @@ export async function POST(request) {
 
     const apiKey = process.env.BSCSCAN_API_KEY;
 
-    const usdtContract = process.env.USDT_BEP20_CONTRACT;
+    const usdtContract =
+      process.env.USDT_BEP20_CONTRACT;
 
     if (!wallet || !apiKey || !usdtContract) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Faltan variables de configuración del pago.",
+          error:
+            "Faltan variables de configuración del pago.",
         },
         { status: 500 }
       );
@@ -88,7 +90,9 @@ export async function POST(request) {
       `https://api.bscscan.com/api` +
       `?module=account` +
       `&action=tokentx` +
-      `&contractaddress=${encodeURIComponent(usdtContract)}` +
+      `&contractaddress=${encodeURIComponent(
+        usdtContract
+      )}` +
       `&address=${encodeURIComponent(wallet)}` +
       `&page=1` +
       `&offset=50` +
@@ -116,19 +120,14 @@ export async function POST(request) {
         ok: true,
         paid: false,
         delivered: false,
+        message: "Esperando el pago...",
       });
     }
 
     const destination = wallet.toLowerCase();
 
     /*
-     * Buscamos una transferencia:
-     *
-     * - USDT correcto
-     * - recibida por nuestra wallet
-     * - cantidad suficiente
-     * - no utilizada anteriormente
-     * - con confirmaciones
+     * Cantidad exacta que esperamos recibir.
      */
     const requiredAmount =
       Number(order.totalUsdt) * 10 ** USDT_DECIMALS;
@@ -136,7 +135,9 @@ export async function POST(request) {
     let matchingTransaction = null;
 
     for (const tx of data.result) {
-      const txTo = String(tx.to || "").toLowerCase();
+      const txTo = String(
+        tx.to || ""
+      ).toLowerCase();
 
       const txContract = String(
         tx.contractAddress || ""
@@ -155,10 +156,16 @@ export async function POST(request) {
         continue;
       }
 
+      /*
+       * El pago debe ser suficiente.
+       */
       if (txValue < requiredAmount) {
         continue;
       }
 
+      /*
+       * Esperamos al menos una confirmación.
+       */
       if (confirmations < 1) {
         continue;
       }
@@ -169,6 +176,10 @@ export async function POST(request) {
         continue;
       }
 
+      /*
+       * No permitimos utilizar la misma transacción
+       * para pagar dos pedidos.
+       */
       const [alreadyUsed] = await db
         .select({
           id: orders.id,
@@ -194,11 +205,11 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * Guardamos la transacción.
-     */
     const txHash = matchingTransaction.hash;
 
+    /*
+     * Marcamos el pedido como pagado.
+     */
     await db
       .update(orders)
       .set({
@@ -216,13 +227,27 @@ export async function POST(request) {
       .from(orderItems)
       .where(eq(orderItems.orderId, order.id));
 
+    /*
+     * Calculamos la cantidad total de códigos que
+     * necesitamos entregar.
+     */
+    const totalCodesNeeded = items.reduce(
+      (sum, item) =>
+        sum + Number(item.quantity),
+      0
+    );
+
     const deliveredCodes = [];
 
     /*
-     * Entregamos un código por cada unidad comprada.
+     * Entregamos un código por cada unidad.
      */
     for (const item of items) {
-      for (let i = 0; i < item.quantity; i++) {
+      for (
+        let i = 0;
+        i < Number(item.quantity);
+        i++
+      ) {
         const [availableCode] = await db
           .select()
           .from(giftCardCodes)
@@ -240,10 +265,17 @@ export async function POST(request) {
           )
           .limit(1);
 
+        /*
+         * Si no hay códigos disponibles, continuamos
+         * sin marcar el pedido como entregado.
+         */
         if (!availableCode) {
           continue;
         }
 
+        /*
+         * Marcamos el código como entregado.
+         */
         const [updatedCode] = await db
           .update(giftCardCodes)
           .set({
@@ -275,10 +307,13 @@ export async function POST(request) {
     }
 
     /*
-     * Si conseguimos todos los códigos,
-     * marcamos el pedido como entregado.
+     * Solo marcamos como entregado si conseguimos
+     * todos los códigos necesarios.
      */
-    if (deliveredCodes.length === items.length) {
+    const delivered =
+      deliveredCodes.length === totalCodesNeeded;
+
+    if (delivered) {
       await db
         .update(orders)
         .set({
@@ -291,20 +326,26 @@ export async function POST(request) {
     return NextResponse.json({
       ok: true,
       paid: true,
-      delivered:
-        deliveredCodes.length === items.length,
+      delivered,
       txHash,
       codes: deliveredCodes,
+      message: delivered
+        ? "Pago confirmado y pedido entregado."
+        : "Pago confirmado. Estamos preparando tu pedido.",
     });
   } catch (error) {
-    console.error("VERIFY_PAYMENT_ERROR:", error);
+    console.error(
+      "VERIFY_PAYMENT_ERROR:",
+      error
+    );
 
     return NextResponse.json(
       {
         ok: false,
-        error: "Error interno al verificar el pago.",
+        error:
+          "Error interno al verificar el pago.",
       },
       { status: 500 }
     );
   }
-            }
+                 }
