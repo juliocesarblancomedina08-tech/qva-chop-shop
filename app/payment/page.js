@@ -7,9 +7,20 @@ export default function PaymentPage() {
   const [cart, setCart] = useState([]);
   const [email, setEmail] = useState("");
   const [order, setOrder] = useState(null);
+
   const [creatingOrder, setCreatingOrder] =
     useState(false);
+
+  const [paymentStatus, setPaymentStatus] =
+    useState("waiting");
+
+  const [deliveredCodes, setDeliveredCodes] =
+    useState([]);
+
   const [error, setError] = useState("");
+  const [verificationError, setVerificationError] =
+    useState("");
+
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -21,6 +32,23 @@ export default function PaymentPage() {
       } catch {
         setCart([]);
       }
+    }
+
+    /*
+     * Recuperamos la referencia si el cliente
+     * actualiza la página durante el pago.
+     */
+    const savedReference =
+      localStorage.getItem("qva_order_reference");
+
+    const savedTotal =
+      localStorage.getItem("qva_order_total");
+
+    if (savedReference && savedTotal) {
+      setOrder({
+        reference: savedReference,
+        totalUsdt: Number(savedTotal),
+      });
     }
   }, []);
 
@@ -82,13 +110,19 @@ export default function PaymentPage() {
       setOrder(data.order);
 
       /*
-       * Guardamos la referencia del pedido
-       * para usarla durante la verificación.
+       * Guardamos la información necesaria para
+       * recuperar el pedido si se recarga la página.
        */
       localStorage.setItem(
         "qva_order_reference",
         data.order.reference
       );
+
+      localStorage.setItem(
+        "qva_order_total",
+        String(data.order.totalUsdt)
+      );
+
     } catch (error) {
       setError(
         error.message ||
@@ -98,6 +132,89 @@ export default function PaymentPage() {
       setCreatingOrder(false);
     }
   }
+
+  async function verifyPayment() {
+    if (!order?.reference) return;
+
+    try {
+      setVerificationError("");
+
+      const response = await fetch(
+        "/api/verify-payment",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            orderReference: order.reference,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.error ||
+            "No se pudo verificar el pago."
+        );
+      }
+
+      if (data.delivered) {
+        setPaymentStatus("delivered");
+
+        setDeliveredCodes(
+          data.codes || []
+        );
+
+        /*
+         * El pedido fue entregado, por lo que
+         * limpiamos el carrito.
+         */
+        localStorage.removeItem("qva_cart");
+
+        return;
+      }
+
+      if (data.paid) {
+        setPaymentStatus("paid");
+        return;
+      }
+
+      setPaymentStatus("waiting");
+
+    } catch (error) {
+      setVerificationError(
+        error.message ||
+          "No se pudo verificar el pago."
+      );
+    }
+  }
+
+  /*
+   * Verificación automática del pago.
+   * Revisamos inmediatamente y después cada
+   * 15 segundos mientras el pedido esté activo.
+   */
+  useEffect(() => {
+    if (!order?.reference) return;
+
+    if (paymentStatus === "delivered") return;
+
+    verifyPayment();
+
+    const interval = setInterval(() => {
+      verifyPayment();
+    }, 15000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [
+    order?.reference,
+    paymentStatus,
+  ]);
 
   async function copyAddress() {
     if (!walletAddress) return;
@@ -112,6 +229,7 @@ export default function PaymentPage() {
       setTimeout(() => {
         setCopied(false);
       }, 2000);
+
     } catch {
       alert("No se pudo copiar la dirección.");
     }
@@ -209,7 +327,7 @@ export default function PaymentPage() {
             </section>
           )}
 
-          {/* IMPORTE */}
+          {/* INFORMACIÓN DEL PAGO */}
 
           {order && (
             <>
@@ -365,24 +483,75 @@ export default function PaymentPage() {
                   Verificación automática
                 </h2>
 
-                <p className="payment-text">
-                  🤖 Nuestro sistema verificará
-                  automáticamente la recepción del pago.
-                </p>
+                {paymentStatus === "waiting" && (
+                  <div className="payment-warning">
+                    ⏳{" "}
+                    <strong>
+                      Esperando confirmación del pago...
+                    </strong>
 
-                <div className="payment-warning">
-                  ⏳{" "}
-                  <strong>
-                    Esperando confirmación del pago...
-                  </strong>
+                    <br />
 
-                  <br />
+                    Nuestro sistema revisa
+                    automáticamente la recepción del
+                    USDT. No es necesario introducir
+                    ningún TX Hash.
+                  </div>
+                )}
 
-                  No es necesario introducir ningún
-                  TX Hash. La entrega continuará
-                  automáticamente cuando el pago sea
-                  confirmado.
-                </div>
+                {paymentStatus === "paid" && (
+                  <div className="payment-warning">
+                    ✅{" "}
+                    <strong>
+                      ¡Pago confirmado!
+                    </strong>
+
+                    <br />
+
+                    Estamos preparando y entregando
+                    automáticamente tu pedido.
+                  </div>
+                )}
+
+                {paymentStatus === "delivered" && (
+                  <div className="payment-warning">
+                    🎉{" "}
+                    <strong>
+                      ¡Pedido entregado correctamente!
+                    </strong>
+
+                    {deliveredCodes.length > 0 && (
+                      <>
+                        <br />
+                        <br />
+
+                        <strong>
+                          Tus códigos:
+                        </strong>
+
+                        {deliveredCodes.map(
+                          (item, index) => (
+                            <p key={index}>
+                              🎁 {item.code}
+                            </p>
+                          )
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {verificationError && (
+                  <p
+                    style={{
+                      marginTop: "12px",
+                      color: "#e57373",
+                      fontSize: "14px",
+                    }}
+                  >
+                    ⚠️ {verificationError}
+                  </p>
+                )}
 
               </section>
             </>
@@ -472,4 +641,4 @@ export default function PaymentPage() {
 
     </main>
   );
-            }
+    }
