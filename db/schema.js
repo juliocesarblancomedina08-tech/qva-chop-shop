@@ -35,36 +35,33 @@ export const products = pgTable("products", {
     .defaultNow(),
 });
 
-export const giftCardCodes = pgTable(
-  "gift_card_codes",
-  {
-    id: serial("id").primaryKey(),
+export const giftCardCodes = pgTable("gift_card_codes", {
+  id: serial("id").primaryKey(),
 
-    productId: integer("product_id").notNull(),
+  productId: integer("product_id").notNull(),
 
-    code: text("code").notNull().unique(),
+  code: text("code").notNull().unique(),
 
-    status: text("status")
-      .notNull()
-      .default("available"),
+  status: text("status")
+    .notNull()
+    .default("available"),
 
-    orderId: integer("order_id"),
+  orderId: integer("order_id"),
 
-    reservedAt: timestamp("reserved_at", {
-      withTimezone: true,
-    }),
+  reservedAt: timestamp("reserved_at", {
+    withTimezone: true,
+  }),
 
-    createdAt: timestamp("created_at", {
-      withTimezone: true,
-    })
-      .notNull()
-      .defaultNow(),
+  createdAt: timestamp("created_at", {
+    withTimezone: true,
+  })
+    .notNull()
+    .defaultNow(),
 
-    deliveredAt: timestamp("delivered_at", {
-      withTimezone: true,
-    }),
-  }
-);
+  deliveredAt: timestamp("delivered_at", {
+    withTimezone: true,
+  }),
+});
 
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
@@ -81,13 +78,10 @@ export const orders = pgTable("orders", {
     scale: 8,
   }).notNull(),
 
-  paymentAmountUsdt: numeric(
-    "payment_amount_usdt",
-    {
-      precision: 12,
-      scale: 8,
-    }
-  ).notNull(),
+  paymentAmountUsdt: numeric("payment_amount_usdt", {
+    precision: 12,
+    scale: 8,
+  }).notNull(),
 
   status: text("status")
     .notNull()
@@ -114,41 +108,19 @@ export const orders = pgTable("orders", {
     .defaultNow(),
 });
 
-export const orderItems = pgTable(
-  "order_items",
-  {
-    id: serial("id").primaryKey(),
+export const orderItems = pgTable("order_items", {
+  id: serial("id").primaryKey(),
 
-    orderId: integer("order_id")
-      .notNull(),
+  orderId: integer("order_id").notNull(),
 
-    productId: integer("product_id")
-      .notNull(),
+  productId: integer("product_id").notNull(),
 
-    productName: text("product_name")
-      .notNull(),
+  productName: text("product_name").notNull(),
 
-    unitPriceUsdt: numeric(
-      "unit_price_usdt",
-      {
-        precision: 12,
-        scale: 8,
-      }
-    ).notNull(),
+  unitPriceUsdt: numeric("unit_price_usdt", {
+    precision: 12,
+    scale: 8,
+  }).notNull(),
 
-    quantity: integer("quantity")
-      .notNull(),
-  }
-);
-
-export type Product =
-  typeof products.$inferSelect;
-
-export type GiftCardCode =
-  typeof giftCardCodes.$inferSelect;
-
-export type Order =
-  typeof orders.$inferSelect;
-
-export type OrderItem =
-  typeof orderItems.$inferSelect;
+  quantity: integer("quantity").notNull(),
+});
