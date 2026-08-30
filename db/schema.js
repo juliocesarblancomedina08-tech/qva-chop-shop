@@ -35,41 +35,6 @@ export const products = pgTable("products", {
     .defaultNow(),
 });
 
-export const giftCardCodes = pgTable("gift_card_codes", {
-  id: serial("id").primaryKey(),
-
-  productId: integer("product_id").notNull(),
-
-  code: text("code").notNull().unique(),
-
-  status: text("status")
-    .notNull()
-    .default("available"),
-
-  /*
-   * El pedido que tiene reservado o recibió
-   * este código.
-   */
-  orderId: integer("order_id"),
-
-  /*
-   * Momento en que el código fue reservado.
-   */
-  reservedAt: timestamp("reserved_at", {
-    withTimezone: true,
-  }),
-
-  createdAt: timestamp("created_at", {
-    withTimezone: true,
-  })
-    .notNull()
-    .defaultNow(),
-
-  deliveredAt: timestamp("delivered_at", {
-    withTimezone: true,
-  }),
-});
-
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
 
@@ -85,15 +50,25 @@ export const orders = pgTable("orders", {
   }).notNull(),
 
   /*
-   * pending, paid, delivered o expired
+   * Importe exacto que debe enviar el cliente.
+   * Lleva una pequeña fracción única para identificar
+   * automáticamente el pedido.
+   */
+  paymentAmountUsdt: numeric("payment_amount_usdt", {
+    precision: 18,
+    scale: 6,
+  }),
+
+  /*
+   * pending
+   * paid
+   * delivered
+   * expired
    */
   status: text("status")
     .notNull()
     .default("pending"),
 
-  /*
-   * Momento máximo para realizar el pago.
-   */
   expiresAt: timestamp("expires_at", {
     withTimezone: true,
   }),
@@ -129,6 +104,40 @@ export const orderItems = pgTable("order_items", {
     scale: 2,
   }).notNull(),
 
-  quantity: integer("quantity")
-    .notNull(),
+  quantity: integer("quantity").notNull(),
+});
+
+export const giftCardCodes = pgTable("gift_card_codes", {
+  id: serial("id").primaryKey(),
+
+  productId: integer("product_id").notNull(),
+
+  code: text("code")
+    .notNull()
+    .unique(),
+
+  /*
+   * available
+   * reserved
+   * delivered
+   */
+  status: text("status")
+    .notNull()
+    .default("available"),
+
+  orderId: integer("order_id"),
+
+  reservedAt: timestamp("reserved_at", {
+    withTimezone: true,
+  }),
+
+  createdAt: timestamp("created_at", {
+    withTimezone: true,
+  })
+    .notNull()
+    .defaultNow(),
+
+  deliveredAt: timestamp("delivered_at", {
+    withTimezone: true,
+  }),
 });
