@@ -46,7 +46,18 @@ export const giftCardCodes = pgTable("gift_card_codes", {
     .notNull()
     .default("available"),
 
+  /*
+   * El pedido que tiene reservado o recibió
+   * este código.
+   */
   orderId: integer("order_id"),
+
+  /*
+   * Momento en que el código fue reservado.
+   */
+  reservedAt: timestamp("reserved_at", {
+    withTimezone: true,
+  }),
 
   createdAt: timestamp("created_at", {
     withTimezone: true,
@@ -66,7 +77,6 @@ export const orders = pgTable("orders", {
     .notNull()
     .unique(),
 
-  // Opcional por ahora: la página de pago no pide correo.
   customerEmail: text("customer_email"),
 
   totalUsdt: numeric("total_usdt", {
@@ -74,9 +84,19 @@ export const orders = pgTable("orders", {
     scale: 2,
   }).notNull(),
 
+  /*
+   * pending, paid, delivered o expired
+   */
   status: text("status")
     .notNull()
     .default("pending"),
+
+  /*
+   * Momento máximo para realizar el pago.
+   */
+  expiresAt: timestamp("expires_at", {
+    withTimezone: true,
+  }),
 
   txHash: text("tx_hash").unique(),
 
