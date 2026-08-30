@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, lt } from "drizzle-orm";
 import { db } from "../../../../lib/db";
 import {
   orders,
@@ -12,6 +12,61 @@ const RESERVATION_MINUTES = 3;
 
 export async function POST(request) {
   try {
+    /*
+     * LIMPIEZA AUTOMÁTICA DE PEDIDOS VENCIDOS
+     *
+     * Antes de crear un pedido nuevo, buscamos los
+     * pedidos pendientes cuyo tiempo ya terminó y
+     * liberamos sus códigos reservados.
+     */
+    const now = new Date();
+
+    const expiredOrders = await db
+      .select({
+        id: orders.id,
+      })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.status, "pending"),
+          lt(orders.expiresAt, now)
+        )
+      );
+
+    for (const expiredOrder of expiredOrders) {
+      /*
+       * Devolvemos los códigos reservados al inventario.
+       */
+      await db
+        .update(giftCardCodes)
+        .set({
+          status: "available",
+          orderId: null,
+          reservedAt: null,
+        })
+        .where(
+          and(
+            eq(giftCardCodes.orderId, expiredOrder.id),
+            eq(giftCardCodes.status, "reserved")
+          )
+        );
+
+      /*
+       * Marcamos el pedido como vencido.
+       */
+      await db
+        .update(orders)
+        .set({
+          status: "expired",
+        })
+        .where(
+          and(
+            eq(orders.id, expiredOrder.id),
+            eq(orders.status, "pending")
+          )
+        );
+    }
+
     const body = await request.json();
 
     const email = String(body?.email || "")
@@ -156,8 +211,6 @@ export async function POST(request) {
     /*
      * El pedido vence exactamente en 3 minutos.
      */
-    const now = new Date();
-
     const expiresAt = new Date(
       now.getTime() +
       RESERVATION_MINUTES * 60 * 1000
@@ -242,10 +295,6 @@ export async function POST(request) {
           .returning();
 
         if (!reservedCode) {
-          /*
-           * Si otro cliente tomó el código al
-           * mismo tiempo, detenemos el proceso.
-           */
           return NextResponse.json(
             {
               ok: false,
@@ -290,4 +339,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-          }
+            }
