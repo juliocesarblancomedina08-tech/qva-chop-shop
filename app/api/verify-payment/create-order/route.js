@@ -1,75 +1,20 @@
 import { NextResponse } from "next/server";
-import { eq, and, lt } from "drizzle-orm";
-import { db } from "../../../../lib/db";
+import { eq, and, sql } from "drizzle-orm";
+import { db } from "../../../lib/db";
 import {
+  products,
   orders,
   orderItems,
-  products,
   giftCardCodes,
-} from "../../../../db/schema";
-
-const RESERVATION_MINUTES = 3;
+} from "../../../db/schema";
 
 export async function POST(request) {
   try {
-    /*
-     * LIMPIEZA AUTOMÁTICA DE PEDIDOS VENCIDOS
-     *
-     * Antes de crear un pedido nuevo, buscamos los
-     * pedidos pendientes cuyo tiempo ya terminó y
-     * liberamos sus códigos reservados.
-     */
-    const now = new Date();
-
-    const expiredOrders = await db
-      .select({
-        id: orders.id,
-      })
-      .from(orders)
-      .where(
-        and(
-          eq(orders.status, "pending"),
-          lt(orders.expiresAt, now)
-        )
-      );
-
-    for (const expiredOrder of expiredOrders) {
-      /*
-       * Devolvemos los códigos reservados al inventario.
-       */
-      await db
-        .update(giftCardCodes)
-        .set({
-          status: "available",
-          orderId: null,
-          reservedAt: null,
-        })
-        .where(
-          and(
-            eq(giftCardCodes.orderId, expiredOrder.id),
-            eq(giftCardCodes.status, "reserved")
-          )
-        );
-
-      /*
-       * Marcamos el pedido como vencido.
-       */
-      await db
-        .update(orders)
-        .set({
-          status: "expired",
-        })
-        .where(
-          and(
-            eq(orders.id, expiredOrder.id),
-            eq(orders.status, "pending")
-          )
-        );
-    }
-
     const body = await request.json();
 
-    const email = String(body?.email || "")
+    const email = String(
+      body?.email || ""
+    )
       .trim()
       .toLowerCase();
 
@@ -98,14 +43,13 @@ export async function POST(request) {
     }
 
     /*
-     * Verificamos todos los productos y las
-     * cantidades solicitadas.
+     * Agrupamos productos.
      */
-    const validatedItems = [];
+    const requested = new Map();
 
     for (const item of cart) {
       const productId = Number(
-        item?.productId || item?.id
+        item?.productId
       );
 
       if (!Number.isInteger(productId)) {
@@ -118,13 +62,44 @@ export async function POST(request) {
         );
       }
 
+      const quantity = Math.max(
+        1,
+        Math.min(
+          20,
+          Number(item?.quantity || 1)
+        )
+      );
+
+      requested.set(
+        productId,
+        (requested.get(productId) || 0) +
+          quantity
+      );
+    }
+
+    /*
+     * Buscamos y validamos los productos
+     * directamente en la base de datos.
+     */
+    const validatedItems = [];
+
+    for (const [
+      productId,
+      quantity,
+    ] of requested.entries()) {
+
       const [product] = await db
         .select()
         .from(products)
-        .where(eq(products.id, productId))
+        .where(
+          and(
+            eq(products.id, productId),
+            eq(products.active, true)
+          )
+        )
         .limit(1);
 
-      if (!product || !product.active) {
+      if (!product) {
         return NextResponse.json(
           {
             ok: false,
@@ -135,10 +110,42 @@ export async function POST(request) {
         );
       }
 
-      const quantity = Math.max(
-        1,
-        Math.floor(Number(item?.quantity) || 1)
+      /*
+       * Comprobamos que existen suficientes
+       * códigos disponibles.
+       */
+      const available = await db
+        .select({
+          count: sql`count(*)`,
+        })
+        .from(giftCardCodes)
+        .where(
+          and(
+            eq(
+              giftCardCodes.productId,
+              productId
+            ),
+            eq(
+              giftCardCodes.status,
+              "available"
+            )
+          )
+        );
+
+      const availableCount = Number(
+        available[0]?.count || 0
       );
+
+      if (availableCount < quantity) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              `No hay suficientes códigos disponibles para ${product.name}.`,
+          },
+          { status: 400 }
+        );
+      }
 
       validatedItems.push({
         product,
@@ -147,46 +154,7 @@ export async function POST(request) {
     }
 
     /*
-     * Antes de crear el pedido comprobamos que
-     * existan suficientes códigos disponibles.
-     */
-    for (const item of validatedItems) {
-      const availableCodes = await db
-        .select({
-          id: giftCardCodes.id,
-        })
-        .from(giftCardCodes)
-        .where(
-          and(
-            eq(
-              giftCardCodes.productId,
-              item.product.id
-            ),
-            eq(
-              giftCardCodes.status,
-              "available"
-            )
-          )
-        )
-        .limit(item.quantity);
-
-      if (
-        availableCodes.length < item.quantity
-      ) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              `No hay suficientes códigos disponibles para ${item.product.name}.`,
-          },
-          { status: 400 }
-        );
-      }
-    }
-
-    /*
-     * Calculamos el total utilizando los precios
-     * guardados en la base de datos.
+     * Calculamos el total real desde Neon.
      */
     const total = validatedItems.reduce(
       (sum, item) =>
@@ -197,11 +165,25 @@ export async function POST(request) {
     );
 
     /*
-     * Creamos una referencia única.
+     * Creamos una pequeña fracción única.
+     *
+     * Esto permite que el servidor identifique
+     * automáticamente el pago sin pedir TX Hash.
      */
+    const uniquePart =
+      Math.floor(
+        Math.random() * 900000
+      ) + 100000;
+
+    const paymentAmount =
+      Number(total.toFixed(2)) +
+      uniquePart / 100000000;
+
     const reference =
       "QVA-" +
-      Date.now().toString(36).toUpperCase() +
+      Date.now()
+        .toString(36)
+        .toUpperCase() +
       "-" +
       Math.random()
         .toString(36)
@@ -209,11 +191,10 @@ export async function POST(request) {
         .toUpperCase();
 
     /*
-     * El pedido vence exactamente en 3 minutos.
+     * El pedido dura 30 minutos.
      */
     const expiresAt = new Date(
-      now.getTime() +
-      RESERVATION_MINUTES * 60 * 1000
+      Date.now() + 30 * 60 * 1000
     );
 
     /*
@@ -225,33 +206,37 @@ export async function POST(request) {
         reference,
         customerEmail: email,
         totalUsdt: total.toFixed(2),
+        paymentAmountUsdt:
+          paymentAmount.toFixed(6),
         status: "pending",
         expiresAt,
       })
       .returning();
 
     /*
-     * Guardamos los productos y reservamos
-     * los códigos específicos para este pedido.
+     * Guardamos los artículos.
      */
-    const reservedCodes = [];
-
     for (const item of validatedItems) {
-      await db.insert(orderItems).values({
-        orderId: order.id,
-        productId: item.product.id,
-        productName: item.product.name,
-        unitPriceUsdt: Number(
-          item.product.priceUsdt
-        ).toFixed(2),
-        quantity: item.quantity,
-      });
+      await db
+        .insert(orderItems)
+        .values({
+          orderId: order.id,
+          productId: item.product.id,
+          productName: item.product.name,
+          unitPriceUsdt:
+            Number(
+              item.product.priceUsdt
+            ).toFixed(2),
+          quantity: item.quantity,
+        });
+    }
 
-      /*
-       * Buscamos los códigos disponibles para
-       * este producto.
-       */
-      const availableCodes = await db
+    /*
+     * Reservamos los códigos para este pedido.
+     */
+    for (const item of validatedItems) {
+
+      const codes = await db
         .select()
         .from(giftCardCodes)
         .where(
@@ -268,17 +253,19 @@ export async function POST(request) {
         )
         .limit(item.quantity);
 
-      /*
-       * Los reservamos inmediatamente para que
-       * ningún otro pedido pueda utilizarlos.
-       */
-      for (const code of availableCodes) {
-        const [reservedCode] = await db
+      if (codes.length !== item.quantity) {
+        throw new Error(
+          "No se pudieron reservar todos los códigos."
+        );
+      }
+
+      for (const code of codes) {
+        await db
           .update(giftCardCodes)
           .set({
             status: "reserved",
             orderId: order.id,
-            reservedAt: now,
+            reservedAt: new Date(),
           })
           .where(
             and(
@@ -291,41 +278,30 @@ export async function POST(request) {
                 "available"
               )
             )
-          )
-          .returning();
-
-        if (!reservedCode) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error:
-                "Uno de los códigos acaba de ser reservado. Inténtalo nuevamente.",
-            },
-            { status: 409 }
           );
-        }
-
-        reservedCodes.push(reservedCode);
       }
     }
 
-    /*
-     * Respondemos con la información necesaria
-     * para mostrar el pago y el contador.
-     */
     return NextResponse.json({
       ok: true,
+
       order: {
         id: order.id,
         reference: order.reference,
-        customerEmail: order.customerEmail,
-        totalUsdt: Number(order.totalUsdt),
-        status: order.status,
-        expiresAt: order.expiresAt,
-        reservedCodes: reservedCodes.length,
+        totalUsdt: Number(
+          order.totalUsdt
+        ),
+        paymentAmountUsdt:
+          Number(
+            order.paymentAmountUsdt
+          ),
+        expiresAt:
+          order.expiresAt,
       },
     });
+
   } catch (error) {
+
     console.error(
       "CREATE_ORDER_ERROR:",
       error
@@ -334,8 +310,10 @@ export async function POST(request) {
     return NextResponse.json(
       {
         ok: false,
-        error: "No se pudo crear el pedido.",
+        error:
+          "No se pudo crear el pedido.",
       },
       { status: 500 }
     );
   }
+        }
