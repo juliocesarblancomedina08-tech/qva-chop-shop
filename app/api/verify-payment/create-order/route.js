@@ -1,20 +1,20 @@
 import { NextResponse } from "next/server";
 import { eq, and, sql } from "drizzle-orm";
-import { db } from "../../../lib/db";
+
+import { db } from "../../../../lib/db";
+
 import {
   products,
   orders,
   orderItems,
   giftCardCodes,
-} from "../../../db/schema";
+} from "../../../../db/schema";
 
 export async function POST(request) {
   try {
     const body = await request.json();
 
-    const email = String(
-      body?.email || ""
-    )
+    const email = String(body?.email || "")
       .trim()
       .toLowerCase();
 
@@ -32,7 +32,7 @@ export async function POST(request) {
       );
     }
 
-    if (!cart.length) {
+    if (cart.length === 0) {
       return NextResponse.json(
         {
           ok: false,
@@ -42,15 +42,10 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * Agrupamos productos.
-     */
     const requested = new Map();
 
     for (const item of cart) {
-      const productId = Number(
-        item?.productId
-      );
+      const productId = Number(item?.productId);
 
       if (!Number.isInteger(productId)) {
         return NextResponse.json(
@@ -62,33 +57,38 @@ export async function POST(request) {
         );
       }
 
-      const quantity = Math.max(
-        1,
-        Math.min(
-          20,
-          Number(item?.quantity || 1)
-        )
+      const quantityNumber = Number(
+        item?.quantity || 1
+      );
+
+      if (
+        !Number.isFinite(quantityNumber) ||
+        quantityNumber < 1
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Cantidad inválida.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const quantity = Math.min(
+        20,
+        Math.floor(quantityNumber)
       );
 
       requested.set(
         productId,
-        (requested.get(productId) || 0) +
-          quantity
+        (requested.get(productId) || 0) + quantity
       );
     }
 
-    /*
-     * Buscamos y validamos los productos
-     * directamente en la base de datos.
-     */
     const validatedItems = [];
 
-    for (const [
-      productId,
-      quantity,
-    ] of requested.entries()) {
-
-      const [product] = await db
+    for (const [productId, quantity] of requested.entries()) {
+      const productResult = await db
         .select()
         .from(products)
         .where(
@@ -98,6 +98,8 @@ export async function POST(request) {
           )
         )
         .limit(1);
+
+      const product = productResult[0];
 
       if (!product) {
         return NextResponse.json(
@@ -110,11 +112,7 @@ export async function POST(request) {
         );
       }
 
-      /*
-       * Comprobamos que existen suficientes
-       * códigos disponibles.
-       */
-      const available = await db
+      const stockResult = await db
         .select({
           count: sql`count(*)`,
         })
@@ -133,7 +131,7 @@ export async function POST(request) {
         );
 
       const availableCount = Number(
-        available[0]?.count || 0
+        stockResult[0]?.count || 0
       );
 
       if (availableCount < quantity) {
@@ -153,27 +151,29 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * Calculamos el total real desde Neon.
-     */
     const total = validatedItems.reduce(
-      (sum, item) =>
-        sum +
-        Number(item.product.priceUsdt) *
-          item.quantity,
+      (sum, item) => {
+        return (
+          sum +
+          Number(item.product.priceUsdt) *
+            item.quantity
+        );
+      },
       0
     );
 
-    /*
-     * Creamos una pequeña fracción única.
-     *
-     * Esto permite que el servidor identifique
-     * automáticamente el pago sin pedir TX Hash.
-     */
+    if (!Number.isFinite(total) || total <= 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "El importe del pedido no es válido.",
+        },
+        { status: 400 }
+      );
+    }
+
     const uniquePart =
-      Math.floor(
-        Math.random() * 900000
-      ) + 100000;
+      Math.floor(Math.random() * 900000) + 100000;
 
     const paymentAmount =
       Number(total.toFixed(2)) +
@@ -190,17 +190,11 @@ export async function POST(request) {
         .substring(2, 8)
         .toUpperCase();
 
-    /*
-     * El pedido dura 30 minutos.
-     */
     const expiresAt = new Date(
       Date.now() + 30 * 60 * 1000
     );
 
-    /*
-     * Creamos el pedido.
-     */
-    const [order] = await db
+    const orderResult = await db
       .insert(orders)
       .values({
         reference,
@@ -213,9 +207,14 @@ export async function POST(request) {
       })
       .returning();
 
-    /*
-     * Guardamos los artículos.
-     */
+    const order = orderResult[0];
+
+    if (!order) {
+      throw new Error(
+        "No se pudo crear el pedido."
+      );
+    }
+
     for (const item of validatedItems) {
       await db
         .insert(orderItems)
@@ -231,11 +230,7 @@ export async function POST(request) {
         });
     }
 
-    /*
-     * Reservamos los códigos para este pedido.
-     */
     for (const item of validatedItems) {
-
       const codes = await db
         .select()
         .from(giftCardCodes)
@@ -284,24 +279,19 @@ export async function POST(request) {
 
     return NextResponse.json({
       ok: true,
-
       order: {
         id: order.id,
         reference: order.reference,
         totalUsdt: Number(
           order.totalUsdt
         ),
-        paymentAmountUsdt:
-          Number(
-            order.paymentAmountUsdt
-          ),
-        expiresAt:
-          order.expiresAt,
+        paymentAmountUsdt: Number(
+          order.paymentAmountUsdt
+        ),
+        expiresAt: order.expiresAt,
       },
     });
-
   } catch (error) {
-
     console.error(
       "CREATE_ORDER_ERROR:",
       error
@@ -316,4 +306,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-        }
+              }
