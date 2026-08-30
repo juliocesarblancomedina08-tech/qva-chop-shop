@@ -13,6 +13,7 @@ export default function PaymentPage() {
   const [deliveredCodes, setDeliveredCodes] =
     useState([]);
   const [copied, setCopied] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(null);
 
   const walletAddress =
     process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS || "";
@@ -31,6 +32,9 @@ export default function PaymentPage() {
       const savedTotal =
         localStorage.getItem("qva_order_total");
 
+      const savedExpiresAt =
+        localStorage.getItem("qva_order_expires_at");
+
       let currentCart = [];
 
       if (savedCart) {
@@ -47,11 +51,25 @@ export default function PaymentPage() {
        * Si ya existe un pedido creado,
        * lo recuperamos para no crear otro.
        */
-      if (savedReference && savedTotal) {
-        setOrder({
+      if (
+        savedReference &&
+        savedTotal &&
+        savedExpiresAt
+      ) {
+        const existingOrder = {
           reference: savedReference,
           totalUsdt: Number(savedTotal),
-        });
+          expiresAt: savedExpiresAt,
+        };
+
+        setOrder(existingOrder);
+
+        if (
+          new Date(savedExpiresAt).getTime() <=
+          Date.now()
+        ) {
+          setPaymentStatus("expired");
+        }
 
         setLoading(false);
         return;
@@ -71,8 +89,7 @@ export default function PaymentPage() {
 
       try {
         /*
-         * Creamos el pedido automáticamente
-         * después de llegar desde Checkout.
+         * Creamos el pedido automáticamente.
          */
         const response = await fetch(
           "/api/verify-payment/create-order",
@@ -88,10 +105,6 @@ export default function PaymentPage() {
           }
         );
 
-        /*
-         * Leemos primero como texto para evitar
-         * el error Unexpected token '<'.
-         */
         const text = await response.text();
 
         let data;
@@ -100,7 +113,7 @@ export default function PaymentPage() {
           data = JSON.parse(text);
         } catch {
           throw new Error(
-            "El servidor no respondió correctamente. Verifica la configuración de la API."
+            "El servidor no respondió correctamente."
           );
         }
 
@@ -122,6 +135,13 @@ export default function PaymentPage() {
           "qva_order_total",
           String(data.order.totalUsdt)
         );
+
+        if (data.order.expiresAt) {
+          localStorage.setItem(
+            "qva_order_expires_at",
+            data.order.expiresAt
+          );
+        }
       } catch (err) {
         setError(
           err.message ||
@@ -134,6 +154,56 @@ export default function PaymentPage() {
 
     startPayment();
   }, []);
+
+  /*
+   * Reloj regresivo del pedido.
+   */
+  useEffect(() => {
+    if (!order?.expiresAt) return;
+
+    if (
+      paymentStatus === "delivered" ||
+      paymentStatus === "expired"
+    ) {
+      return;
+    }
+
+    function updateTimer() {
+      const difference =
+        new Date(order.expiresAt).getTime() -
+        Date.now();
+
+      if (difference <= 0) {
+        setTimeLeft(0);
+        setPaymentStatus("expired");
+
+        localStorage.removeItem(
+          "qva_order_reference"
+        );
+
+        localStorage.removeItem(
+          "qva_order_total"
+        );
+
+        localStorage.removeItem(
+          "qva_order_expires_at"
+        );
+
+        return;
+      }
+
+      setTimeLeft(difference);
+    }
+
+    updateTimer();
+
+    const interval = setInterval(
+      updateTimer,
+      1000
+    );
+
+    return () => clearInterval(interval);
+  }, [order?.expiresAt, paymentStatus]);
 
   const total = order
     ? Number(order.totalUsdt)
@@ -149,8 +219,41 @@ export default function PaymentPage() {
       )}`
     : "";
 
+  function formatTime(milliseconds) {
+    if (
+      milliseconds === null ||
+      milliseconds === undefined
+    ) {
+      return "--:--";
+    }
+
+    const totalSeconds = Math.max(
+      0,
+      Math.floor(milliseconds / 1000)
+    );
+
+    const minutes = Math.floor(
+      totalSeconds / 60
+    );
+
+    const seconds =
+      totalSeconds % 60;
+
+    return `${String(minutes).padStart(
+      2,
+      "0"
+    )}:${String(seconds).padStart(
+      2,
+      "0"
+    )}`;
+  }
+
   async function verifyPayment() {
     if (!order?.reference) return;
+
+    if (paymentStatus === "expired") {
+      return;
+    }
 
     try {
       const response = await fetch(
@@ -185,11 +288,26 @@ export default function PaymentPage() {
         );
       }
 
+      if (data.expired) {
+        setPaymentStatus("expired");
+        setTimeLeft(0);
+        return;
+      }
+
       if (data.delivered) {
         setPaymentStatus("delivered");
         setDeliveredCodes(data.codes || []);
 
         localStorage.removeItem("qva_cart");
+        localStorage.removeItem(
+          "qva_order_reference"
+        );
+        localStorage.removeItem(
+          "qva_order_total"
+        );
+        localStorage.removeItem(
+          "qva_order_expires_at"
+        );
 
         return;
       }
@@ -203,8 +321,7 @@ export default function PaymentPage() {
     } catch {
       /*
        * Si hay un error temporal,
-       * la verificación automática
-       * volverá a intentarlo.
+       * la verificación volverá a intentarlo.
        */
     }
   }
@@ -216,7 +333,12 @@ export default function PaymentPage() {
   useEffect(() => {
     if (!order?.reference) return;
 
-    if (paymentStatus === "delivered") return;
+    if (
+      paymentStatus === "delivered" ||
+      paymentStatus === "expired"
+    ) {
+      return;
+    }
 
     verifyPayment();
 
@@ -241,7 +363,9 @@ export default function PaymentPage() {
         setCopied(false);
       }, 2000);
     } catch {
-      alert("No se pudo copiar la dirección.");
+      alert(
+        "No se pudo copiar la dirección."
+      );
     }
   }
 
@@ -311,191 +435,230 @@ export default function PaymentPage() {
 
           {!loading && !error && order && (
             <>
+
               <section className="checkout-box payment-total-box">
 
                 <div>
                   <p className="payment-small-title">
-                    TOTAL A PAGAR
+                    TIEMPO PARA REALIZAR EL PAGO
                   </p>
 
-                  <div className="payment-big-amount">
-                    {total.toFixed(2)}
-                    <span> USDT</span>
+                  <div
+                    className="payment-big-amount"
+                    style={{
+                      fontSize: "2rem",
+                    }}
+                  >
+                    ⏱️ {formatTime(timeLeft)}
                   </div>
                 </div>
 
                 <div className="payment-network">
-                  BEP-20
+                  {paymentStatus === "expired"
+                    ? "VENCIDO"
+                    : "ACTIVO"}
                 </div>
 
               </section>
 
-              <section className="checkout-box">
+              {paymentStatus === "expired" ? (
 
-                <h2 className="payment-section-title">
-                  Pedido creado correctamente
-                </h2>
+                <section className="checkout-box">
 
-                <p className="payment-text">
-                  📦 Referencia de tu pedido:
-                </p>
+                  <h2 className="payment-section-title">
+                    ⏰ Pedido vencido
+                  </h2>
 
-                <strong>
-                  {order.reference}
-                </strong>
+                  <div className="payment-warning">
+                    El tiempo para realizar este pago
+                    ha terminado.
 
-              </section>
+                    <br />
+                    <br />
 
-              <section className="checkout-box">
+                    Los productos reservados han sido
+                    liberados nuevamente para otros
+                    clientes.
 
-                <h2 className="payment-section-title">
-                  Método de pago
-                </h2>
+                    <br />
+                    <br />
 
-                <div className="payment-method">
-
-                  <div className="payment-method-icon">
-                    💲
+                    Por favor, crea un nuevo pedido si
+                    deseas realizar la compra.
                   </div>
 
-                  <div>
-                    <strong>
-                      Tether USD (USDT)
-                    </strong>
-
-                    <span>
-                      BNB Smart Chain · BEP-20
-                    </span>
-                  </div>
-
-                </div>
-
-              </section>
-
-              <section className="checkout-box">
-
-                <h2 className="payment-section-title">
-                  Realiza el pago
-                </h2>
-
-                <p className="payment-text">
-                  Envía exactamente{" "}
-                  <strong>
-                    {total.toFixed(2)} USDT
-                  </strong>{" "}
-                  a la siguiente dirección.
-                </p>
-
-                <div className="payment-qr-card">
-
-                  {qrUrl ? (
-                    <img
-                      src={qrUrl}
-                      alt="QR de pago USDT BEP-20"
-                      className="payment-qr-image"
-                    />
-                  ) : (
-                    <div className="qr-placeholder-large">
-                      QR
-                    </div>
-                  )}
-
-                </div>
-
-                <p className="qr-caption">
-                  Escanea el código QR para obtener
-                  la dirección de pago.
-                </p>
-
-                <div className="payment-address-box">
-
-                  <code>
-                    {walletAddress ||
-                      "Dirección no configurada"}
-                  </code>
-
-                  <button
-                    type="button"
-                    onClick={copyAddress}
-                    className="copy-button"
-                    disabled={!walletAddress}
+                  <Link
+                    href="/cart"
+                    className="checkout-primary-button"
                   >
-                    {copied
-                      ? "✓ COPIADO"
-                      : "📋 COPIAR"}
-                  </button>
+                    CREAR NUEVO PEDIDO
+                  </Link>
 
-                </div>
+                </section>
 
-                <div className="payment-warning">
-                  ⚠️ <strong>Importante:</strong>{" "}
-                  envía únicamente USDT por la red
-                  BEP-20. No utilices otra red.
-                </div>
+              ) : (
 
-              </section>
+                <>
 
-              <section className="checkout-box">
+                  <section className="checkout-box payment-total-box">
 
-                <h2 className="payment-section-title">
-                  Verificación automática
-                </h2>
+                    <div>
+                      <p className="payment-small-title">
+                        TOTAL A PAGAR
+                      </p>
 
-                {paymentStatus === "waiting" && (
-                  <div className="payment-warning">
-                    ⏳ <strong>
-                      Esperando confirmación del pago...
+                      <div className="payment-big-amount">
+                        {total.toFixed(2)}
+                        <span> USDT</span>
+                      </div>
+                    </div>
+
+                    <div className="payment-network">
+                      BEP-20
+                    </div>
+
+                  </section>
+
+                  <section className="checkout-box">
+
+                    <h2 className="payment-section-title">
+                      Pedido creado correctamente
+                    </h2>
+
+                    <p className="payment-text">
+                      📦 Referencia de tu pedido:
+                    </p>
+
+                    <strong>
+                      {order.reference}
                     </strong>
 
-                    <br />
+                  </section>
 
-                    Nuestro sistema está verificando
-                    automáticamente la recepción del
-                    USDT.
-                  </div>
-                )}
+                  <section className="checkout-box">
 
-                {paymentStatus === "paid" && (
-                  <div className="payment-warning">
-                    ✅ <strong>
-                      ¡Pago confirmado!
-                    </strong>
+                    <h2 className="payment-section-title">
+                      Realiza el pago
+                    </h2>
 
-                    <br />
+                    <p className="payment-text">
+                      Envía exactamente{" "}
+                      <strong>
+                        {total.toFixed(2)} USDT
+                      </strong>{" "}
+                      antes de que termine el tiempo.
+                    </p>
 
-                    Estamos preparando la entrega de tu
-                    pedido.
-                  </div>
-                )}
+                    <div className="payment-qr-card">
 
-                {paymentStatus === "delivered" && (
-                  <div className="payment-warning">
-                    🎉 <strong>
-                      ¡Pedido entregado correctamente!
-                    </strong>
+                      {qrUrl ? (
+                        <img
+                          src={qrUrl}
+                          alt="QR de pago USDT BEP-20"
+                          className="payment-qr-image"
+                        />
+                      ) : (
+                        <div className="qr-placeholder-large">
+                          QR
+                        </div>
+                      )}
 
-                    {deliveredCodes.length > 0 && (
-                      <>
-                        <br />
-                        <br />
+                    </div>
 
-                        <strong>
-                          Tus códigos:
+                    <div className="payment-address-box">
+
+                      <code>
+                        {walletAddress ||
+                          "Dirección no configurada"}
+                      </code>
+
+                      <button
+                        type="button"
+                        onClick={copyAddress}
+                        className="copy-button"
+                        disabled={!walletAddress}
+                      >
+                        {copied
+                          ? "✓ COPIADO"
+                          : "📋 COPIAR"}
+                      </button>
+
+                    </div>
+
+                    <div className="payment-warning">
+                      ⚠️ <strong>Importante:</strong>{" "}
+                      envía únicamente USDT por la red
+                      BEP-20.
+                    </div>
+
+                  </section>
+
+                  <section className="checkout-box">
+
+                    <h2 className="payment-section-title">
+                      Verificación automática
+                    </h2>
+
+                    {paymentStatus === "waiting" && (
+                      <div className="payment-warning">
+                        ⏳ <strong>
+                          Esperando confirmación del
+                          pago...
                         </strong>
 
-                        {deliveredCodes.map(
-                          (item, index) => (
-                            <p key={index}>
-                              🎁 {item.code}
-                            </p>
-                          )
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
+                        <br />
 
-              </section>
+                        Nuestro sistema está revisando
+                        automáticamente la llegada del
+                        USDT.
+                      </div>
+                    )}
+
+                    {paymentStatus === "paid" && (
+                      <div className="payment-warning">
+                        ✅ <strong>
+                          ¡Pago confirmado!
+                        </strong>
+
+                        <br />
+
+                        Estamos preparando tu pedido.
+                      </div>
+                    )}
+
+                    {paymentStatus === "delivered" && (
+                      <div className="payment-warning">
+                        🎉 <strong>
+                          ¡Pedido entregado
+                          correctamente!
+                        </strong>
+
+                        {deliveredCodes.length > 0 && (
+                          <>
+                            <br />
+                            <br />
+
+                            <strong>
+                              Tus códigos:
+                            </strong>
+
+                            {deliveredCodes.map(
+                              (item, index) => (
+                                <p key={index}>
+                                  🎁 {item.code}
+                                </p>
+                              )
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                  </section>
+
+                </>
+              )}
+
             </>
           )}
 
@@ -545,9 +708,7 @@ export default function PaymentPage() {
           </div>
 
           <div className="summary-line">
-            <span>
-              Subtotal
-            </span>
+            <span>Subtotal</span>
 
             <span>
               {total.toFixed(2)} USDT
@@ -555,24 +716,11 @@ export default function PaymentPage() {
           </div>
 
           <div className="summary-total">
-            <span>
-              Total
-            </span>
+            <span>Total</span>
 
             <strong>
               {total.toFixed(2)} USDT
             </strong>
-          </div>
-
-          <div className="checkout-security">
-            <div>
-              🔒
-            </div>
-
-            <p>
-              Comprueba siempre que la dirección y la
-              red sean correctas antes de enviar.
-            </p>
           </div>
 
         </aside>
@@ -581,4 +729,4 @@ export default function PaymentPage() {
 
     </main>
   );
-}
+    }
