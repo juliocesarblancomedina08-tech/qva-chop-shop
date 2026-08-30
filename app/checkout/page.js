@@ -6,9 +6,11 @@ import { useEffect, useState } from "react";
 export default function CheckoutPage() {
   const [cart, setCart] = useState([]);
   const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const savedCart = localStorage.getItem("qva_cart");
+    const savedEmail = localStorage.getItem("qva_customer_email");
 
     if (savedCart) {
       try {
@@ -17,20 +19,48 @@ export default function CheckoutPage() {
         setCart([]);
       }
     }
+
+    if (savedEmail) {
+      setEmail(savedEmail);
+    }
   }, []);
 
   const total = cart.reduce(
-    (sum, item) => sum + Number(item.price),
+    (sum, item) =>
+      sum + Number(item.price || 0),
     0
   );
 
   const canContinue =
     email.trim() !== "" && cart.length > 0;
 
+  function handleContinue() {
+    if (!email.trim()) {
+      setError(
+        "Introduce tu correo electrónico para continuar."
+      );
+      return;
+    }
+
+    if (!cart.length) {
+      setError("Tu carrito está vacío.");
+      return;
+    }
+
+    /*
+     * Guardamos el correo para utilizarlo
+     * en la página de pago.
+     */
+    localStorage.setItem(
+      "qva_customer_email",
+      email.trim().toLowerCase()
+    );
+
+    window.location.href = "/payment";
+  }
+
   return (
     <main className="checkout-page">
-
-      {/* HEADER */}
 
       <header className="checkout-header">
 
@@ -38,7 +68,7 @@ export default function CheckoutPage() {
           href="/"
           className="checkout-logo"
         >
-          🎮 Qva🇨🇺CHOP 🛒
+          🤖 Qva🇨🇺CHOP 🛒
         </Link>
 
         <div className="checkout-secure">
@@ -47,13 +77,9 @@ export default function CheckoutPage() {
 
       </header>
 
-      {/* CONTENT */}
-
       <div className="checkout-container">
 
         <div className="checkout-main">
-
-          {/* TITLE */}
 
           <div className="checkout-heading">
 
@@ -71,7 +97,7 @@ export default function CheckoutPage() {
 
           </div>
 
-          {/* EMAIL */}
+          {/* INFORMACIÓN DE CONTACTO */}
 
           <section className="checkout-box">
 
@@ -86,7 +112,8 @@ export default function CheckoutPage() {
                 </h2>
 
                 <p>
-                  Recibirás la confirmación del pedido aquí.
+                  Recibirás la confirmación y la información
+                  de tu pedido en este correo.
                 </p>
               </div>
             </div>
@@ -98,16 +125,28 @@ export default function CheckoutPage() {
             <input
               type="email"
               value={email}
-              onChange={(e) =>
-                setEmail(e.target.value)
-              }
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setError("");
+              }}
               placeholder="tu@email.com"
               className="checkout-input"
             />
 
+            {error && (
+              <p
+                style={{
+                  marginTop: "10px",
+                  fontSize: "14px",
+                }}
+              >
+                ⚠️ {error}
+              </p>
+            )}
+
           </section>
 
-          {/* ORDER */}
+          {/* RESUMEN DEL PEDIDO */}
 
           <section className="checkout-box">
 
@@ -132,6 +171,7 @@ export default function CheckoutPage() {
             {cart.length === 0 ? (
 
               <div className="checkout-empty">
+
                 <p>
                   Tu carrito está vacío.
                 </p>
@@ -142,6 +182,7 @@ export default function CheckoutPage() {
                 >
                   🛍️ Volver a la tienda
                 </Link>
+
               </div>
 
             ) : (
@@ -152,7 +193,7 @@ export default function CheckoutPage() {
 
                   <div
                     className="checkout-product"
-                    key={`${item.diamonds}-${index}`}
+                    key={`${item.id || item.diamonds}-${index}`}
                   >
 
                     <div className="checkout-product-icon">
@@ -172,7 +213,9 @@ export default function CheckoutPage() {
                     </div>
 
                     <strong className="checkout-product-price">
-                      {Number(item.price).toFixed(2)} USDT
+                      {Number(
+                        item.price || 0
+                      ).toFixed(2)} USDT
                     </strong>
 
                   </div>
@@ -187,11 +230,12 @@ export default function CheckoutPage() {
 
         </div>
 
-        {/* ORDER SUMMARY */}
+        {/* RESUMEN LATERAL */}
 
         <aside className="checkout-summary">
 
           <div className="summary-header">
+
             <h2>
               Tu pedido
             </h2>
@@ -200,6 +244,7 @@ export default function CheckoutPage() {
               {cart.length} producto
               {cart.length !== 1 ? "s" : ""}
             </span>
+
           </div>
 
           <div className="summary-items">
@@ -208,7 +253,7 @@ export default function CheckoutPage() {
 
               <div
                 className="summary-item"
-                key={`${item.diamonds}-summary-${index}`}
+                key={`${item.id || item.diamonds}-summary-${index}`}
               >
 
                 <span>
@@ -216,7 +261,9 @@ export default function CheckoutPage() {
                 </span>
 
                 <strong>
-                  {Number(item.price).toFixed(2)}
+                  {Number(
+                    item.price || 0
+                  ).toFixed(2)} USDT
                 </strong>
 
               </div>
@@ -226,6 +273,7 @@ export default function CheckoutPage() {
           </div>
 
           <div className="summary-line">
+
             <span>
               Subtotal
             </span>
@@ -233,6 +281,7 @@ export default function CheckoutPage() {
             <span>
               {total.toFixed(2)} USDT
             </span>
+
           </div>
 
           <div className="summary-total">
@@ -247,24 +296,19 @@ export default function CheckoutPage() {
 
           </div>
 
-          {canContinue ? (
-
-            <Link
-              href="/payment"
-              className="checkout-primary-button"
-            >
-              CONTINUAR AL PAGO
-              <span>→</span>
-            </Link>
-
-          ) : (
-
-            <div className="checkout-primary-button disabled">
-              CONTINUAR AL PAGO
-              <span>→</span>
-            </div>
-
-          )}
+          <button
+            type="button"
+            onClick={handleContinue}
+            className={
+              canContinue
+                ? "checkout-primary-button"
+                : "checkout-primary-button disabled"
+            }
+            disabled={!canContinue}
+          >
+            CONTINUAR AL PAGO
+            <span>→</span>
+          </button>
 
           <div className="checkout-security">
 
@@ -286,4 +330,4 @@ export default function CheckoutPage() {
 
     </main>
   );
-                }
+            }
