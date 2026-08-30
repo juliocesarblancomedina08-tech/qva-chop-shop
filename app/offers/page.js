@@ -5,80 +5,109 @@ import Link from "next/link";
 
 const offers = [
   {
-    id: 8,
+    productId: 8,
     diamonds: "100",
     price: 1.01,
   },
   {
-    id: 9,
+    productId: 9,
     diamonds: "210",
     price: 2.0,
   },
   {
-    id: 10,
+    productId: 10,
     diamonds: "530",
     price: 5.0,
   },
   {
-    id: 11,
+    productId: 11,
     diamonds: "1080",
     price: 10.0,
   },
   {
-    id: 12,
+    productId: 12,
     diamonds: "2200",
     price: 20.0,
   },
 ];
 
 export default function OffersPage() {
-  const [selectedOffer, setSelectedOffer] =
-    useState(null);
-
+  const [selectedOffer, setSelectedOffer] = useState(null);
   const [added, setAdded] = useState(false);
 
   function addToCart() {
-    if (!selectedOffer) return;
-
-    let currentCart = [];
+    if (!selectedOffer) {
+      return;
+    }
 
     try {
       const savedCart =
         localStorage.getItem("qva_cart");
 
+      let currentCart = [];
+
       if (savedCart) {
-        currentCart = JSON.parse(savedCart);
+        try {
+          const parsed = JSON.parse(savedCart);
+
+          if (Array.isArray(parsed)) {
+            currentCart = parsed;
+          }
+        } catch {
+          currentCart = [];
+        }
       }
 
-      if (!Array.isArray(currentCart)) {
-        currentCart = [];
+      const existingIndex =
+        currentCart.findIndex(
+          (item) =>
+            Number(item.productId) ===
+            Number(selectedOffer.productId)
+        );
+
+      if (existingIndex >= 0) {
+        currentCart[existingIndex] = {
+          ...currentCart[existingIndex],
+          quantity:
+            Number(
+              currentCart[existingIndex].quantity || 1
+            ) + 1,
+        };
+      } else {
+        currentCart.push({
+          productId:
+            selectedOffer.productId,
+
+          diamonds:
+            selectedOffer.diamonds,
+
+          price:
+            selectedOffer.price,
+
+          quantity: 1,
+        });
       }
-    } catch {
-      currentCart = [];
+
+      localStorage.setItem(
+        "qva_cart",
+        JSON.stringify(currentCart)
+      );
+
+      window.dispatchEvent(
+        new Event("cartUpdated")
+      );
+
+      setAdded(true);
+    } catch (error) {
+      console.error(
+        "ADD_TO_CART_ERROR:",
+        error
+      );
+
+      alert(
+        "No se pudo añadir el producto al carrito."
+      );
     }
-
-    const cartItem = {
-      productId: selectedOffer.id,
-      diamonds: selectedOffer.diamonds,
-      price: selectedOffer.price,
-      quantity: 1,
-    };
-
-    const newCart = [
-      ...currentCart,
-      cartItem,
-    ];
-
-    localStorage.setItem(
-      "qva_cart",
-      JSON.stringify(newCart)
-    );
-
-    window.dispatchEvent(
-      new Event("cartUpdated")
-    );
-
-    setAdded(true);
   }
 
   return (
@@ -87,11 +116,11 @@ export default function OffersPage() {
       <header className="header">
 
         <div className="logo">
-          🤖 Qva🇨🇺CHOP 🛒
+          🎮 Qva🇨🇺CHOP 🛒
         </div>
 
         <p className="subtitle">
-          🇸🇬 💎 Diamond Singapur
+          💎 Diamond Singapur
         </p>
 
       </header>
@@ -118,11 +147,12 @@ export default function OffersPage() {
             {offers.map((offer) => {
 
               const isSelected =
-                selectedOffer?.id === offer.id;
+                selectedOffer?.productId ===
+                offer.productId;
 
               return (
                 <button
-                  key={offer.id}
+                  key={offer.productId}
                   type="button"
                   onClick={() => {
                     setSelectedOffer(offer);
@@ -143,8 +173,7 @@ export default function OffersPage() {
                   </span>
 
                   <strong>
-                    {offer.price.toFixed(2)}
-                    {" "}USDT
+                    {offer.price.toFixed(2)} USDT
                   </strong>
 
                 </button>
@@ -154,6 +183,7 @@ export default function OffersPage() {
           </div>
 
           {selectedOffer && (
+
             <div className="selected-offer">
 
               <p>
@@ -161,13 +191,12 @@ export default function OffersPage() {
               </p>
 
               <strong>
-                💎 {selectedOffer.diamonds}
-                {" — "}
-                {selectedOffer.price.toFixed(2)}
-                {" "}USDT
+                💎 {selectedOffer.diamonds} —{" "}
+                {selectedOffer.price.toFixed(2)} USDT
               </strong>
 
             </div>
+
           )}
 
           <button
@@ -180,6 +209,7 @@ export default function OffersPage() {
           </button>
 
           {added && (
+
             <p
               style={{
                 marginTop: "14px",
@@ -189,7 +219,15 @@ export default function OffersPage() {
             >
               ✅ Añadido al carrito
             </p>
+
           )}
+
+          <Link
+            href="/cart"
+            className="back-link"
+          >
+            🛒 Ver carrito
+          </Link>
 
           <Link
             href="/"
@@ -208,4 +246,4 @@ export default function OffersPage() {
 
     </main>
   );
-                    }
+              }
