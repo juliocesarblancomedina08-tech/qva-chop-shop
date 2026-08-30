@@ -4,60 +4,119 @@ import { useState } from "react";
 import Link from "next/link";
 
 const offers = [
-  { id: 8, diamonds: "100", price: 1.01 },
-  { id: 9, diamonds: "210", price: 2.0 },
-  { id: 10, diamonds: "530", price: 5.0 },
-  { id: 11, diamonds: "1080", price: 10.0 },
-  { id: 12, diamonds: "2200", price: 20.0 },
+  {
+    id: 8,
+    diamonds: "100",
+    price: 1.01,
+  },
+  {
+    id: 9,
+    diamonds: "210",
+    price: 2.0,
+  },
+  {
+    id: 10,
+    diamonds: "530",
+    price: 5.0,
+  },
+  {
+    id: 11,
+    diamonds: "1080",
+    price: 10.0,
+  },
+  {
+    id: 12,
+    diamonds: "2200",
+    price: 20.0,
+  },
 ];
 
 export default function OffersPage() {
-  const [selectedOffer, setSelectedOffer] = useState(null);
+  const [selectedOffer, setSelectedOffer] =
+    useState(null);
+
   const [added, setAdded] = useState(false);
 
-  const addToCart = () => {
+  function addToCart() {
     if (!selectedOffer) return;
 
-    const savedCart = localStorage.getItem("qva_cart");
+    let currentCart = [];
 
-    const currentCart = savedCart
-      ? JSON.parse(savedCart)
-      : [];
+    try {
+      const savedCart =
+        localStorage.getItem("qva_cart");
 
-    const newCart = [...currentCart, selectedOffer];
+      if (savedCart) {
+        currentCart = JSON.parse(savedCart);
+      }
+
+      if (!Array.isArray(currentCart)) {
+        currentCart = [];
+      }
+    } catch {
+      currentCart = [];
+    }
+
+    const cartItem = {
+      productId: selectedOffer.id,
+      diamonds: selectedOffer.diamonds,
+      price: selectedOffer.price,
+      quantity: 1,
+    };
+
+    const newCart = [
+      ...currentCart,
+      cartItem,
+    ];
 
     localStorage.setItem(
       "qva_cart",
       JSON.stringify(newCart)
     );
 
-    window.dispatchEvent(new Event("cartUpdated"));
+    window.dispatchEvent(
+      new Event("cartUpdated")
+    );
 
     setAdded(true);
-  };
+  }
 
   return (
     <main className="shop-container">
-      <header className="header">
-        <div className="logo">🤖 Qva🇨🇺CHOP 🛒</div>
 
-        <p className="subtitle">🇸🇬 💎 Diamond Singapur</p>
+      <header className="header">
+
+        <div className="logo">
+          🤖 Qva🇨🇺CHOP 🛒
+        </div>
+
+        <p className="subtitle">
+          🇸🇬 💎 Diamond Singapur
+        </p>
+
       </header>
 
       <section className="product-section">
+
         <div className="product-card">
-          <div className="product-icon">💎</div>
+
+          <div className="product-icon">
+            💎
+          </div>
 
           <h1 className="product-title">
             Diamonds Singapur
           </h1>
 
           <p className="product-description">
-            Selecciona la cantidad de diamantes que deseas comprar.
+            Selecciona la cantidad de diamantes
+            que deseas comprar.
           </p>
 
           <div className="offers-list">
+
             {offers.map((offer) => {
+
               const isSelected =
                 selectedOffer?.id === offer.id;
 
@@ -70,30 +129,44 @@ export default function OffersPage() {
                     setAdded(false);
                   }}
                   className={`offer-item ${
-                    isSelected ? "offer-selected" : ""
+                    isSelected
+                      ? "offer-selected"
+                      : ""
                   }`}
                 >
+
                   <span>
-                    {isSelected ? "✅" : "💎"}{" "}
+                    {isSelected
+                      ? "✅"
+                      : "💎"}{" "}
                     {offer.diamonds} 💎
                   </span>
 
                   <strong>
-                    {offer.price.toFixed(2)} USDT
+                    {offer.price.toFixed(2)}
+                    {" "}USDT
                   </strong>
+
                 </button>
               );
             })}
+
           </div>
 
           {selectedOffer && (
             <div className="selected-offer">
-              <p>Oferta seleccionada:</p>
+
+              <p>
+                Oferta seleccionada:
+              </p>
 
               <strong>
-                💎 {selectedOffer.diamonds} —{" "}
-                {selectedOffer.price.toFixed(2)} USDT
+                💎 {selectedOffer.diamonds}
+                {" — "}
+                {selectedOffer.price.toFixed(2)}
+                {" "}USDT
               </strong>
+
             </div>
           )}
 
@@ -118,15 +191,21 @@ export default function OffersPage() {
             </p>
           )}
 
-          <Link href="/" className="back-link">
+          <Link
+            href="/"
+            className="back-link"
+          >
             ← Volver a la tienda
           </Link>
+
         </div>
+
       </section>
 
       <footer className="footer">
         ⚡ Entrega rápida · 🛡️ Compra segura
       </footer>
+
     </main>
   );
-}
+                    }
