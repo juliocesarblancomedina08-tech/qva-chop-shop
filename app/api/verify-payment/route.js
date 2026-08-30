@@ -1,562 +1,317 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "../../../lib/db";
 import {
+  products,
   orders,
   orderItems,
   giftCardCodes,
 } from "../../../db/schema";
 
-/*
- * USDT BEP-20 utiliza 18 decimales.
- */
-const USDT_DECIMALS = 18;
-
-/*
- * Firma del evento Transfer(address,address,uint256)
- */
-const TRANSFER_TOPIC =
-  "0xddf252ad1be2c89b69c2b068fc378daa" +
-  "952ba7f163c4a11628f55a4df523b3ef";
-
-function toAddressTopic(address) {
-  return (
-    "0x000000000000000000000000" +
-    address.toLowerCase().replace("0x", "")
-  );
-}
-
-function formatRpcHex(number) {
-  return `0x${number.toString(16)}`;
-}
-
-function decimalToUnits(value, decimals) {
-  const text = String(value || "0").trim();
-
-  if (!text || text.startsWith("-")) {
-    return 0n;
-  }
-
-  const parts = text.split(".");
-  const whole = parts[0] || "0";
-  const fraction = parts[1] || "";
-
-  const paddedFraction = (
-    fraction + "0".repeat(decimals)
-  ).slice(0, decimals);
-
-  return (
-    BigInt(whole) * 10n ** BigInt(decimals) +
-    BigInt(paddedFraction || "0")
-  );
-}
-
 export async function POST(request) {
   try {
     const body = await request.json();
-    const orderReference = body?.orderReference;
 
-    if (!orderReference) {
+    const email = String(
+      body?.email || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const cart = Array.isArray(body?.cart)
+      ? body.cart
+      : [];
+
+    if (!email) {
       return NextResponse.json(
         {
           ok: false,
-          error: "Falta la referencia del pedido.",
+          error: "El correo electrónico es obligatorio.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (!cart.length) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "El carrito está vacío.",
         },
         { status: 400 }
       );
     }
 
     /*
-     * Buscamos el pedido.
+     * Agrupamos productos.
      */
-    const [order] = await db
-      .select()
-      .from(orders)
-      .where(eq(orders.reference, orderReference))
-      .limit(1);
+    const requested = new Map();
 
-    if (!order) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Pedido no encontrado.",
-        },
-        { status: 404 }
+    for (const item of cart) {
+      const productId = Number(
+        item?.productId
+      );
+
+      if (!Number.isInteger(productId)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Producto inválido.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const quantity = Math.max(
+        1,
+        Math.min(
+          20,
+          Number(item?.quantity || 1)
+        )
+      );
+
+      requested.set(
+        productId,
+        (requested.get(productId) || 0) +
+          quantity
       );
     }
 
     /*
-     * Si ya fue entregado, devolvemos los códigos.
+     * Buscamos y validamos los productos
+     * directamente en la base de datos.
      */
-    if (order.status === "delivered") {
-      const deliveredCodes = await db
+    const validatedItems = [];
+
+    for (const [
+      productId,
+      quantity,
+    ] of requested.entries()) {
+
+      const [product] = await db
+        .select()
+        .from(products)
+        .where(
+          and(
+            eq(products.id, productId),
+            eq(products.active, true)
+          )
+        )
+        .limit(1);
+
+      if (!product) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Uno de los productos ya no está disponible.",
+          },
+          { status: 400 }
+        );
+      }
+
+      /*
+       * Comprobamos que existen suficientes
+       * códigos disponibles.
+       */
+      const available = await db
         .select({
-          code: giftCardCodes.code,
-          productId: giftCardCodes.productId,
+          count: sql`count(*)`,
         })
         .from(giftCardCodes)
         .where(
           and(
-            eq(giftCardCodes.orderId, order.id),
-            eq(giftCardCodes.status, "delivered")
-          )
-        );
-
-      return NextResponse.json({
-        ok: true,
-        paid: true,
-        delivered: true,
-        expired: false,
-        codes: deliveredCodes,
-      });
-    }
-
-    /*
-     * Un pedido vencido no puede volver a usarse.
-     */
-    if (order.status === "expired") {
-      return NextResponse.json({
-        ok: true,
-        paid: false,
-        delivered: false,
-        expired: true,
-        message: "Este pedido ha vencido.",
-      });
-    }
-
-    /*
-     * Comprobamos el tiempo límite.
-     */
-    const now = new Date();
-
-    if (
-      order.expiresAt &&
-      now.getTime() >= new Date(order.expiresAt).getTime()
-    ) {
-      /*
-       * Liberamos los códigos reservados.
-       */
-      await db
-        .update(giftCardCodes)
-        .set({
-          status: "available",
-          orderId: null,
-          reservedAt: null,
-        })
-        .where(
-          and(
-            eq(giftCardCodes.orderId, order.id),
-            eq(giftCardCodes.status, "reserved")
-          )
-        );
-
-      await db
-        .update(orders)
-        .set({
-          status: "expired",
-        })
-        .where(eq(orders.id, order.id));
-
-      return NextResponse.json({
-        ok: true,
-        paid: false,
-        delivered: false,
-        expired: true,
-        message: "El tiempo para realizar el pago ha terminado.",
-      });
-    }
-
-    /*
-     * Variables de configuración.
-     */
-    const rpcUrl = process.env.BSC_RPC_URL;
-
-    const wallet =
-      process.env.STORE_WALLET_ADDRESS ||
-      process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS;
-
-    const usdtContract =
-      process.env.USDT_BEP20_CONTRACT;
-
-    /*
-     * Diagnóstico de variables.
-     * No muestra los valores secretos, solamente
-     * confirma si están disponibles.
-     */
-    if (!rpcUrl || !wallet || !usdtContract) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Faltan variables de configuración del pago.",
-          debug: {
-            rpcConfigured: Boolean(rpcUrl),
-            walletConfigured: Boolean(wallet),
-            contractConfigured: Boolean(usdtContract),
-          },
-        },
-        { status: 500 }
-      );
-    }
-
-    const destination = wallet.toLowerCase();
-    const contract = usdtContract.toLowerCase();
-
-    /*
-     * Consultamos el bloque más reciente.
-     */
-    const latestBlockResponse = await fetch(
-      rpcUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          method: "eth_blockNumber",
-          params: [],
-          id: 1,
-        }),
-        cache: "no-store",
-      }
-    );
-
-    if (!latestBlockResponse.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "El servidor RPC no respondió correctamente.",
-          debug: {
-            rpcStatus: latestBlockResponse.status,
-          },
-        },
-        { status: 502 }
-      );
-    }
-
-    const latestBlockData =
-      await latestBlockResponse.json();
-
-    if (
-      !latestBlockData.result ||
-      latestBlockData.error
-    ) {
-      console.error(
-        "RPC_BLOCK_ERROR:",
-        latestBlockData
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No se pudo consultar la blockchain.",
-          debug: {
-            rpcError: latestBlockData.error
-              ? String(latestBlockData.error.message || "RPC error")
-              : null,
-          },
-        },
-        { status: 502 }
-      );
-    }
-
-    const latestBlock = parseInt(
-      latestBlockData.result,
-      16
-    );
-
-    /*
-     * Buscamos transferencias recientes.
-     */
-    const fromBlock = Math.max(
-      0,
-      latestBlock - 500
-    );
-
-    /*
-     * Buscamos eventos Transfer de USDT hacia
-     * nuestra billetera.
-     */
-    const logsResponse = await fetch(
-      rpcUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          method: "eth_getLogs",
-          params: [
-            {
-              fromBlock: formatRpcHex(fromBlock),
-              toBlock: "latest",
-              address: contract,
-              topics: [
-                TRANSFER_TOPIC,
-                null,
-                toAddressTopic(destination),
-              ],
-            },
-          ],
-          id: 2,
-        }),
-        cache: "no-store",
-      }
-    );
-
-    if (!logsResponse.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No se pudo consultar el historial de pagos.",
-          debug: {
-            rpcStatus: logsResponse.status,
-          },
-        },
-        { status: 502 }
-      );
-    }
-
-    const logsData = await logsResponse.json();
-
-    if (
-      logsData.error ||
-      !Array.isArray(logsData.result)
-    ) {
-      console.error(
-        "RPC_LOGS_ERROR:",
-        logsData
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No se pudieron consultar los pagos.",
-          debug: {
-            rpcError: logsData.error
-              ? String(logsData.error.message || "RPC error")
-              : null,
-          },
-        },
-        { status: 502 }
-      );
-    }
-
-    /*
-     * Cantidad exacta requerida.
-     */
-    const requiredValue = decimalToUnits(
-      order.totalUsdt,
-      USDT_DECIMALS
-    );
-
-    let matchingLog = null;
-
-    for (const log of logsData.result) {
-      try {
-        const txHash = String(
-          log.transactionHash || ""
-        );
-
-        if (!txHash) {
-          continue;
-        }
-
-        /*
-         * Evitamos reutilizar una transacción.
-         */
-        const [alreadyUsed] = await db
-          .select({
-            id: orders.id,
-          })
-          .from(orders)
-          .where(eq(orders.txHash, txHash))
-          .limit(1);
-
-        if (alreadyUsed) {
-          continue;
-        }
-
-        const value = BigInt(
-          log.data || "0x0"
-        );
-
-        if (value < requiredValue) {
-          continue;
-        }
-
-        matchingLog = log;
-        break;
-      } catch (error) {
-        console.error(
-          "RPC_LOG_PROCESS_ERROR:",
-          error
-        );
-      }
-    }
-
-    /*
-     * Todavía no encontramos un pago.
-     */
-    if (!matchingLog) {
-      return NextResponse.json({
-        ok: true,
-        paid: false,
-        delivered: false,
-        expired: false,
-        message: "Esperando el pago...",
-      });
-    }
-
-    const txHash =
-      matchingLog.transactionHash;
-
-    /*
-     * Marcamos el pedido como pagado.
-     */
-    await db
-      .update(orders)
-      .set({
-        status: "paid",
-        txHash,
-        paidAt: new Date(),
-      })
-      .where(eq(orders.id, order.id));
-
-    /*
-     * Buscamos los códigos reservados.
-     */
-    const reservedCodes = await db
-      .select()
-      .from(giftCardCodes)
-      .where(
-        and(
-          eq(
-            giftCardCodes.orderId,
-            order.id
-          ),
-          eq(
-            giftCardCodes.status,
-            "reserved"
-          )
-        )
-      );
-
-    const items = await db
-      .select()
-      .from(orderItems)
-      .where(
-        eq(
-          orderItems.orderId,
-          order.id
-        )
-      );
-
-    const totalCodesNeeded =
-      items.reduce(
-        (sum, item) =>
-          sum + Number(item.quantity),
-        0
-      );
-
-    if (
-      reservedCodes.length !== totalCodesNeeded
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          paid: true,
-          delivered: false,
-          error:
-            "El pedido no tiene todos los códigos reservados.",
-        },
-        { status: 500 }
-      );
-    }
-
-    /*
-     * Entregamos exclusivamente los códigos
-     * reservados para este pedido.
-     */
-    const deliveredCodes = [];
-
-    for (const reservedCode of reservedCodes) {
-      const [updatedCode] = await db
-        .update(giftCardCodes)
-        .set({
-          status: "delivered",
-          deliveredAt: new Date(),
-        })
-        .where(
-          and(
             eq(
-              giftCardCodes.id,
-              reservedCode.id
+              giftCardCodes.productId,
+              productId
             ),
             eq(
               giftCardCodes.status,
-              "reserved"
+              "available"
+            )
+          )
+        );
+
+      const availableCount = Number(
+        available[0]?.count || 0
+      );
+
+      if (availableCount < quantity) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              `No hay suficientes códigos disponibles para ${product.name}.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      validatedItems.push({
+        product,
+        quantity,
+      });
+    }
+
+    /*
+     * Calculamos el total real desde Neon.
+     */
+    const total = validatedItems.reduce(
+      (sum, item) =>
+        sum +
+        Number(item.product.priceUsdt) *
+          item.quantity,
+      0
+    );
+
+    /*
+     * Creamos una pequeña fracción única.
+     *
+     * Esto permite que el servidor identifique
+     * automáticamente el pago sin pedir TX Hash.
+     */
+    const uniquePart =
+      Math.floor(
+        Math.random() * 900000
+      ) + 100000;
+
+    const paymentAmount =
+      Number(total.toFixed(2)) +
+      uniquePart / 100000000;
+
+    const reference =
+      "QVA-" +
+      Date.now()
+        .toString(36)
+        .toUpperCase() +
+      "-" +
+      Math.random()
+        .toString(36)
+        .substring(2, 8)
+        .toUpperCase();
+
+    /*
+     * El pedido dura 30 minutos.
+     */
+    const expiresAt = new Date(
+      Date.now() + 30 * 60 * 1000
+    );
+
+    /*
+     * Creamos el pedido.
+     */
+    const [order] = await db
+      .insert(orders)
+      .values({
+        reference,
+        customerEmail: email,
+        totalUsdt: total.toFixed(2),
+        paymentAmountUsdt:
+          paymentAmount.toFixed(6),
+        status: "pending",
+        expiresAt,
+      })
+      .returning();
+
+    /*
+     * Guardamos los artículos.
+     */
+    for (const item of validatedItems) {
+      await db
+        .insert(orderItems)
+        .values({
+          orderId: order.id,
+          productId: item.product.id,
+          productName: item.product.name,
+          unitPriceUsdt:
+            Number(
+              item.product.priceUsdt
+            ).toFixed(2),
+          quantity: item.quantity,
+        });
+    }
+
+    /*
+     * Reservamos los códigos para este pedido.
+     */
+    for (const item of validatedItems) {
+
+      const codes = await db
+        .select()
+        .from(giftCardCodes)
+        .where(
+          and(
+            eq(
+              giftCardCodes.productId,
+              item.product.id
             ),
             eq(
-              giftCardCodes.orderId,
-              order.id
+              giftCardCodes.status,
+              "available"
             )
           )
         )
-        .returning();
+        .limit(item.quantity);
 
-      if (updatedCode) {
-        deliveredCodes.push({
-          productId:
-            updatedCode.productId,
-          code: updatedCode.code,
-        });
+      if (codes.length !== item.quantity) {
+        throw new Error(
+          "No se pudieron reservar todos los códigos."
+        );
       }
-    }
 
-    const delivered =
-      deliveredCodes.length === totalCodesNeeded;
-
-    if (delivered) {
-      await db
-        .update(orders)
-        .set({
-          status: "delivered",
-          deliveredAt: new Date(),
-        })
-        .where(eq(orders.id, order.id));
+      for (const code of codes) {
+        await db
+          .update(giftCardCodes)
+          .set({
+            status: "reserved",
+            orderId: order.id,
+            reservedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(
+                giftCardCodes.id,
+                code.id
+              ),
+              eq(
+                giftCardCodes.status,
+                "available"
+              )
+            )
+          );
+      }
     }
 
     return NextResponse.json({
       ok: true,
-      paid: true,
-      delivered,
-      expired: false,
-      txHash,
-      codes: deliveredCodes,
-      message: delivered
-        ? "Pago confirmado y pedido entregado."
-        : "Pago confirmado. Estamos preparando tu pedido.",
+
+      order: {
+        id: order.id,
+        reference: order.reference,
+        totalUsdt: Number(
+          order.totalUsdt
+        ),
+        paymentAmountUsdt:
+          Number(
+            order.paymentAmountUsdt
+          ),
+        expiresAt:
+          order.expiresAt,
+      },
     });
+
   } catch (error) {
+
     console.error(
-      "VERIFY_PAYMENT_ERROR:",
+      "CREATE_ORDER_ERROR:",
       error
     );
 
-    /*
-     * Temporalmente devolvemos información básica
-     * del error para poder diagnosticarlo.
-     */
     return NextResponse.json(
       {
         ok: false,
-        error: "Error interno al verificar el pago.",
-        debug:
-          error instanceof Error
-            ? error.message
-            : String(error),
+        error:
+          "No se pudo crear el pedido.",
       },
       { status: 500 }
     );
