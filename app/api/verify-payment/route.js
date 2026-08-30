@@ -41,7 +41,8 @@ export async function POST(request) {
       );
     }
 
-    // Si el pedido ya fue entregado, devolvemos los códigos.
+    // Si el pedido ya fue entregado, no volvemos
+    // a entregar los códigos.
     if (order.status === "delivered") {
       const deliveredCodes = await db
         .select({
@@ -64,6 +65,7 @@ export async function POST(request) {
       process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS;
 
     const apiKey = process.env.BSCSCAN_API_KEY;
+
     const usdtContract =
       process.env.USDT_BEP20_CONTRACT;
 
@@ -78,10 +80,8 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * Consultamos las transferencias de USDT BEP-20
-     * recibidas por la billetera de la tienda.
-     */
+    // Consultamos las transferencias USDT BEP-20
+    // recibidas por la billetera.
     const url =
       `https://api.bscscan.com/api` +
       `?module=account` +
@@ -122,14 +122,10 @@ export async function POST(request) {
 
     const destination = wallet.toLowerCase();
 
-    /*
-     * BscScan devuelve el valor del token en unidades
-     * pequeñas. USDT BEP-20 utiliza normalmente 18 decimales
-     * en BNB Smart Chain.
-     */
+    // Convertimos el precio esperado a unidades mínimas
+    // de USDT.
     const requiredAmount =
-      Number(order.totalUsdt) *
-      10 ** USDT_DECIMALS;
+      Number(order.totalUsdt) * 10 ** USDT_DECIMALS;
 
     let matchingTransaction = null;
 
@@ -155,12 +151,10 @@ export async function POST(request) {
         continue;
       }
 
-      // El pago debe ser suficiente.
       if (txValue < requiredAmount) {
         continue;
       }
 
-      // Esperamos al menos una confirmación.
       if (confirmations < 1) {
         continue;
       }
@@ -171,10 +165,8 @@ export async function POST(request) {
         continue;
       }
 
-      /*
-       * No permitimos reutilizar una misma transacción
-       * para pagar varios pedidos.
-       */
+      // Evitamos que una misma transacción pueda
+      // pagar más de un pedido.
       const [alreadyUsed] = await db
         .select({
           id: orders.id,
@@ -218,10 +210,7 @@ export async function POST(request) {
       .from(orderItems)
       .where(eq(orderItems.orderId, order.id));
 
-    /*
-     * Calculamos la cantidad total de códigos que
-     * necesitamos entregar.
-     */
+    // Calculamos cuántos códigos necesitamos entregar.
     const totalCodesNeeded = items.reduce(
       (sum, item) =>
         sum + Number(item.quantity),
@@ -230,9 +219,7 @@ export async function POST(request) {
 
     const deliveredCodes = [];
 
-    /*
-     * Entregamos un código por cada unidad comprada.
-     */
+    // Entregamos un código por cada unidad.
     for (const item of items) {
       for (
         let i = 0;
@@ -256,16 +243,10 @@ export async function POST(request) {
           )
           .limit(1);
 
-        // Si no hay códigos disponibles, continuamos.
         if (!availableCode) {
           continue;
         }
 
-        /*
-         * Marcamos el código como entregado.
-         * La condición "available" evita entregar
-         * el mismo código dos veces.
-         */
         const [updatedCode] = await db
           .update(giftCardCodes)
           .set({
@@ -296,10 +277,8 @@ export async function POST(request) {
       }
     }
 
-    /*
-     * Solo marcamos el pedido como entregado si
-     * conseguimos todos los códigos necesarios.
-     */
+    // Solo marcamos como entregado si todos los códigos
+    // necesarios fueron entregados.
     const delivered =
       deliveredCodes.length === totalCodesNeeded;
 
@@ -338,4 +317,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-        }
+      }
