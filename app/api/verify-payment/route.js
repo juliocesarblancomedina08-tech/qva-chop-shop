@@ -7,12 +7,9 @@ import {
   giftCardCodes,
 } from "../../../db/schema";
 
-const USDT_DECIMALS = 18;
-
 export async function POST(request) {
   try {
     const body = await request.json();
-
     const orderReference = body?.orderReference;
 
     if (!orderReference) {
@@ -63,6 +60,7 @@ export async function POST(request) {
         ok: true,
         paid: true,
         delivered: true,
+        expired: false,
         codes: deliveredCodes,
       });
     }
@@ -81,19 +79,19 @@ export async function POST(request) {
       });
     }
 
+    /*
+     * Comprobamos si el tiempo del pedido terminó.
+     */
     const now = new Date();
 
-    /*
-     * Comprobamos si los 3 minutos terminaron.
-     */
     if (
       order.expiresAt &&
       now.getTime() >=
         new Date(order.expiresAt).getTime()
     ) {
       /*
-       * Liberamos únicamente los códigos
-       * reservados para este pedido.
+       * Liberamos los códigos reservados
+       * exclusivamente para este pedido.
        */
       await db
         .update(giftCardCodes)
@@ -130,7 +128,7 @@ export async function POST(request) {
     }
 
     /*
-     * Configuración del sistema de pagos.
+     * Configuración del pago.
      */
     const wallet =
       process.env.STORE_WALLET_ADDRESS ||
@@ -153,12 +151,13 @@ export async function POST(request) {
     }
 
     /*
-     * Consultamos las transferencias recibidas
-     * de USDT BEP-20.
+     * API V2 de Etherscan/BscScan.
+     * chainid=56 corresponde a BNB Smart Chain.
      */
     const url =
-      `https://api.bscscan.com/api` +
-      `?module=account` +
+      `https://api.etherscan.io/v2/api` +
+      `?chainid=56` +
+      `&module=account` +
       `&action=tokentx` +
       `&contractaddress=${encodeURIComponent(
         usdtContract
@@ -174,10 +173,16 @@ export async function POST(request) {
     });
 
     if (!response.ok) {
+      console.error(
+        "BSCSCAN_HTTP_ERROR:",
+        response.status
+      );
+
       return NextResponse.json(
         {
           ok: false,
-          error: "No se pudo consultar BscScan.",
+          error:
+            "No se pudo consultar el explorador de pagos.",
         },
         { status: 502 }
       );
@@ -185,7 +190,21 @@ export async function POST(request) {
 
     const data = await response.json();
 
+    /*
+     * Esto aparecerá en los logs del servidor
+     * y nos ayudará a diagnosticar problemas.
+     */
+    console.log(
+      "PAYMENT_API_RESPONSE:",
+      JSON.stringify(data)
+    );
+
     if (!Array.isArray(data.result)) {
+      console.error(
+        "PAYMENT_API_INVALID_RESULT:",
+        data
+      );
+
       return NextResponse.json({
         ok: true,
         paid: false,
@@ -198,11 +217,10 @@ export async function POST(request) {
     const destination = wallet.toLowerCase();
 
     /*
-     * Calculamos la cantidad exacta requerida.
+     * Usamos los decimales que devuelve la propia
+     * transacción, evitando asumir siempre 18.
      */
-    const requiredAmount =
-      Number(order.totalUsdt) *
-      10 ** USDT_DECIMALS;
+    const orderAmount = Number(order.totalUsdt);
 
     let matchingTransaction = null;
 
@@ -215,24 +233,45 @@ export async function POST(request) {
         tx.contractAddress || ""
       ).toLowerCase();
 
-      const txValue = Number(tx.value || 0);
-
       const confirmations = Number(
         tx.confirmations || 0
       );
 
+      const decimals = Number(
+        tx.tokenDecimal || 18
+      );
+
+      /*
+       * BigInt evita errores de precisión con
+       * cantidades grandes en la unidad mínima.
+       */
+      let txValue = 0n;
+
+      try {
+        txValue = BigInt(tx.value || "0");
+      } catch {
+        continue;
+      }
+
+      const requiredValue = BigInt(
+        Math.round(
+          orderAmount * 10 ** decimals
+        )
+      );
+
       if (
         txTo !== destination ||
-        txContract !== usdtContract.toLowerCase()
+        txContract !==
+          usdtContract.toLowerCase()
       ) {
         continue;
       }
 
       /*
-       * El pago debe ser igual o superior al
-       * total del pedido.
+       * El pago debe ser igual o superior
+       * al total del pedido.
        */
-      if (txValue < requiredAmount) {
+      if (txValue < requiredValue) {
         continue;
       }
 
@@ -250,8 +289,8 @@ export async function POST(request) {
       }
 
       /*
-       * Evitamos que una misma transacción
-       * pague más de un pedido.
+       * Evitamos reutilizar una misma
+       * transacción para otro pedido.
        */
       const [alreadyUsed] = await db
         .select({
@@ -270,7 +309,7 @@ export async function POST(request) {
     }
 
     /*
-     * Todavía no encontramos el pago.
+     * Aún no se detectó un pago válido.
      */
     if (!matchingTransaction) {
       return NextResponse.json({
@@ -297,8 +336,8 @@ export async function POST(request) {
       .where(eq(orders.id, order.id));
 
     /*
-     * Buscamos exclusivamente los códigos
-     * que fueron reservados para este pedido.
+     * Obtenemos únicamente los códigos
+     * reservados para este pedido.
      */
     const reservedCodes = await db
       .select()
@@ -311,8 +350,8 @@ export async function POST(request) {
       );
 
     /*
-     * Verificamos cuántos códigos necesita
-     * realmente el pedido.
+     * Obtenemos la cantidad de códigos
+     * necesarios para el pedido.
      */
     const items = await db
       .select()
@@ -326,23 +365,24 @@ export async function POST(request) {
     );
 
     /*
-     * Si falta algún código reservado, no
-     * entregamos códigos nuevos por error.
+     * Por seguridad no entregamos códigos
+     * diferentes a los reservados.
      */
     if (
       reservedCodes.length !== totalCodesNeeded
     ) {
-      return NextResponse.json({
-        ok: false,
-        paid: true,
-        delivered: false,
-        error:
-          "El pedido no tiene todos los códigos reservados.",
-      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "El pedido no tiene todos los códigos reservados.",
+        },
+        { status: 500 }
+      );
     }
 
     /*
-     * Convertimos todos los códigos reservados
+     * Convertimos los códigos reservados
      * en códigos entregados.
      */
     const deliveredCodes = [];
@@ -419,4 +459,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-      }
+        }
