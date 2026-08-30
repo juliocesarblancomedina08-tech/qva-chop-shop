@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 
 export default function PaymentPage() {
   const [cart, setCart] = useState([]);
-  const [txHash, setTxHash] = useState("");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -57,7 +56,7 @@ export default function PaymentPage() {
       <header className="checkout-header">
 
         <Link href="/" className="checkout-logo">
-          🎮 Qva🇨🇺CHOP 🛒
+          🤖 Qva🇨🇺CHOP 🛒
         </Link>
 
         <div className="checkout-secure">
@@ -122,8 +121,27 @@ export default function PaymentPage() {
 
             <div className="payment-method">
 
+              {/* LOGO USDT */}
+
               <div className="payment-method-icon">
-                🪙
+                <svg
+                  width="46"
+                  height="46"
+                  viewBox="0 0 64 64"
+                  aria-label="USDT"
+                >
+                  <circle
+                    cx="32"
+                    cy="32"
+                    r="30"
+                    fill="#26A17B"
+                  />
+
+                  <path
+                    d="M14 17h36v7H37v5.5c7.8.6 13 2.4 13 4.6 0 2.8-8 5-18 5s-18-2.2-18-5c0-2.2 5.2-4 13-4.6V24H14v-7zm18 16c-7.5 0-12.5.8-12.5 1.7 0 .9 5 1.8 12.5 1.8s12.5-.9 12.5-1.8c0-.9-5-1.7-12.5-1.7z"
+                    fill="white"
+                  />
+                </svg>
               </div>
 
               <div>
@@ -149,8 +167,9 @@ export default function PaymentPage() {
             </h2>
 
             <p className="payment-text">
-              Escanea el código QR o copia la dirección
-              de la billetera.
+              Envía exactamente{" "}
+              <strong>{total.toFixed(2)} USDT</strong>{" "}
+              a la dirección indicada.
             </p>
 
             <div className="payment-qr-card">
@@ -198,39 +217,27 @@ export default function PaymentPage() {
 
           </section>
 
-          {/* TX HASH */}
+          {/* VERIFICACIÓN AUTOMÁTICA */}
 
           <section className="checkout-box">
 
             <h2 className="payment-section-title">
-              Confirmar el pago
+              Verificación automática
             </h2>
 
             <p className="payment-text">
-              Después de realizar el pago, introduce
-              aquí el TX Hash de tu transacción.
+              🤖 Después de realizar el pago, nuestro
+              sistema verificará automáticamente la
+              recepción del USDT.
             </p>
 
-            <label className="checkout-label">
-              TX Hash
-            </label>
-
-            <input
-              type="text"
-              value={txHash}
-              onChange={(e) => setTxHash(e.target.value)}
-              placeholder="0x..."
-              className="checkout-input"
-            />
-
-            <button
-              type="button"
-              className="checkout-primary-button payment-submit"
-              disabled={!txHash.trim()}
-            >
-              🔍 VERIFICAR PAGO
-              <span>→</span>
-            </button>
+            <div className="payment-warning">
+              ⏳ <strong>Esperando confirmación del pago...</strong>
+              <br />
+              No es necesario introducir ningún TX Hash.
+              La entrega continuará automáticamente
+              cuando el pago sea confirmado.
+            </div>
 
           </section>
 
@@ -266,7 +273,7 @@ export default function PaymentPage() {
 
               <div
                 className="summary-item"
-                key={`${item.diamonds}-${index}`}
+                key={`${item.id || item.diamonds}-${index}`}
               >
 
                 <span>
@@ -274,7 +281,7 @@ export default function PaymentPage() {
                 </span>
 
                 <strong>
-                  {Number(item.price || 0).toFixed(2)}
+                  {Number(item.price || 0).toFixed(2)} USDT
                 </strong>
 
               </div>
@@ -326,4 +333,4 @@ export default function PaymentPage() {
 
     </main>
   );
-                }
+    }
