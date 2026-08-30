@@ -41,8 +41,10 @@ export async function POST(request) {
       );
     }
 
-    // Si ya fue entregado, devolvemos los códigos
-    // sin volver a entregar otros.
+    /*
+     * Si el pedido ya fue entregado,
+     * devolvemos los mismos códigos.
+     */
     if (order.status === "delivered") {
       const deliveredCodes = await db
         .select({
@@ -50,7 +52,12 @@ export async function POST(request) {
           productId: giftCardCodes.productId,
         })
         .from(giftCardCodes)
-        .where(eq(giftCardCodes.orderId, order.id));
+        .where(
+          and(
+            eq(giftCardCodes.orderId, order.id),
+            eq(giftCardCodes.status, "delivered")
+          )
+        );
 
       return NextResponse.json({
         ok: true,
@@ -60,11 +67,77 @@ export async function POST(request) {
       });
     }
 
+    /*
+     * Si el pedido ya venció anteriormente,
+     * no volvemos a aceptar pagos.
+     */
+    if (order.status === "expired") {
+      return NextResponse.json({
+        ok: true,
+        paid: false,
+        delivered: false,
+        expired: true,
+        message: "Este pedido ha vencido.",
+      });
+    }
+
+    const now = new Date();
+
+    /*
+     * Comprobamos si los 3 minutos terminaron.
+     */
+    if (
+      order.expiresAt &&
+      now.getTime() >=
+        new Date(order.expiresAt).getTime()
+    ) {
+      /*
+       * Liberamos únicamente los códigos
+       * reservados para este pedido.
+       */
+      await db
+        .update(giftCardCodes)
+        .set({
+          status: "available",
+          orderId: null,
+          reservedAt: null,
+        })
+        .where(
+          and(
+            eq(giftCardCodes.orderId, order.id),
+            eq(giftCardCodes.status, "reserved")
+          )
+        );
+
+      /*
+       * Marcamos el pedido como vencido.
+       */
+      await db
+        .update(orders)
+        .set({
+          status: "expired",
+        })
+        .where(eq(orders.id, order.id));
+
+      return NextResponse.json({
+        ok: true,
+        paid: false,
+        delivered: false,
+        expired: true,
+        message:
+          "El tiempo para realizar el pago ha terminado.",
+      });
+    }
+
+    /*
+     * Configuración del sistema de pagos.
+     */
     const wallet =
       process.env.STORE_WALLET_ADDRESS ||
       process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS;
 
     const apiKey = process.env.BSCSCAN_API_KEY;
+
     const usdtContract =
       process.env.USDT_BEP20_CONTRACT;
 
@@ -79,8 +152,10 @@ export async function POST(request) {
       );
     }
 
-    // Consultamos las transferencias de USDT BEP-20
-    // recibidas por nuestra billetera.
+    /*
+     * Consultamos las transferencias recibidas
+     * de USDT BEP-20.
+     */
     const url =
       `https://api.bscscan.com/api` +
       `?module=account` +
@@ -115,14 +190,16 @@ export async function POST(request) {
         ok: true,
         paid: false,
         delivered: false,
+        expired: false,
         message: "Esperando el pago...",
       });
     }
 
     const destination = wallet.toLowerCase();
 
-    // BscScan devuelve el valor en la unidad mínima
-    // del token. USDT BEP-20 utiliza 18 decimales.
+    /*
+     * Calculamos la cantidad exacta requerida.
+     */
     const requiredAmount =
       Number(order.totalUsdt) *
       10 ** USDT_DECIMALS;
@@ -151,10 +228,17 @@ export async function POST(request) {
         continue;
       }
 
+      /*
+       * El pago debe ser igual o superior al
+       * total del pedido.
+       */
       if (txValue < requiredAmount) {
         continue;
       }
 
+      /*
+       * Esperamos al menos una confirmación.
+       */
       if (confirmations < 1) {
         continue;
       }
@@ -165,8 +249,10 @@ export async function POST(request) {
         continue;
       }
 
-      // Evitamos utilizar la misma transacción
-      // para pagar dos pedidos diferentes.
+      /*
+       * Evitamos que una misma transacción
+       * pague más de un pedido.
+       */
       const [alreadyUsed] = await db
         .select({
           id: orders.id,
@@ -183,18 +269,24 @@ export async function POST(request) {
       break;
     }
 
+    /*
+     * Todavía no encontramos el pago.
+     */
     if (!matchingTransaction) {
       return NextResponse.json({
         ok: true,
         paid: false,
         delivered: false,
+        expired: false,
         message: "Esperando el pago...",
       });
     }
 
     const txHash = matchingTransaction.hash;
 
-    // Marcamos el pedido como pagado.
+    /*
+     * Marcamos el pedido como pagado.
+     */
     await db
       .update(orders)
       .set({
@@ -204,76 +296,87 @@ export async function POST(request) {
       })
       .where(eq(orders.id, order.id));
 
-    // Obtenemos los productos del pedido.
+    /*
+     * Buscamos exclusivamente los códigos
+     * que fueron reservados para este pedido.
+     */
+    const reservedCodes = await db
+      .select()
+      .from(giftCardCodes)
+      .where(
+        and(
+          eq(giftCardCodes.orderId, order.id),
+          eq(giftCardCodes.status, "reserved")
+        )
+      );
+
+    /*
+     * Verificamos cuántos códigos necesita
+     * realmente el pedido.
+     */
     const items = await db
       .select()
       .from(orderItems)
       .where(eq(orderItems.orderId, order.id));
 
-    // Cantidad total de códigos que debemos entregar.
     const totalCodesNeeded = items.reduce(
       (sum, item) =>
         sum + Number(item.quantity),
       0
     );
 
+    /*
+     * Si falta algún código reservado, no
+     * entregamos códigos nuevos por error.
+     */
+    if (
+      reservedCodes.length !== totalCodesNeeded
+    ) {
+      return NextResponse.json({
+        ok: false,
+        paid: true,
+        delivered: false,
+        error:
+          "El pedido no tiene todos los códigos reservados.",
+      });
+    }
+
+    /*
+     * Convertimos todos los códigos reservados
+     * en códigos entregados.
+     */
     const deliveredCodes = [];
 
-    // Entregamos un código por cada unidad comprada.
-    for (const item of items) {
-      for (
-        let i = 0;
-        i < Number(item.quantity);
-        i++
-      ) {
-        const [availableCode] = await db
-          .select()
-          .from(giftCardCodes)
-          .where(
-            and(
-              eq(
-                giftCardCodes.productId,
-                item.productId
-              ),
-              eq(
-                giftCardCodes.status,
-                "available"
-              )
+    for (const reservedCode of reservedCodes) {
+      const [updatedCode] = await db
+        .update(giftCardCodes)
+        .set({
+          status: "delivered",
+          deliveredAt: new Date(),
+        })
+        .where(
+          and(
+            eq(
+              giftCardCodes.id,
+              reservedCode.id
+            ),
+            eq(
+              giftCardCodes.status,
+              "reserved"
+            ),
+            eq(
+              giftCardCodes.orderId,
+              order.id
             )
           )
-          .limit(1);
+        )
+        .returning();
 
-        if (!availableCode) {
-          continue;
-        }
-
-        const [updatedCode] = await db
-          .update(giftCardCodes)
-          .set({
-            status: "delivered",
-            orderId: order.id,
-            deliveredAt: new Date(),
-          })
-          .where(
-            and(
-              eq(
-                giftCardCodes.id,
-                availableCode.id
-              ),
-              eq(
-                giftCardCodes.status,
-                "available"
-              )
-            )
-          )
-          .returning();
-
-        if (updatedCode) {
-          deliveredCodes.push({
-            productId: updatedCode.productId,
-            code: updatedCode.code,
-          });
-        }
+      if (updatedCode) {
+        deliveredCodes.push({
+          productId: updatedCode.productId,
+          code: updatedCode.code,
+        });
       }
     }
 
@@ -294,6 +397,7 @@ export async function POST(request) {
       ok: true,
       paid: true,
       delivered,
+      expired: false,
       txHash,
       codes: deliveredCodes,
       message: delivered
@@ -315,4 +419,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-}
+      }
