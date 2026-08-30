@@ -10,15 +10,24 @@ import {
 
 export const products = pgTable("products", {
   id: serial("id").primaryKey(),
+
   name: text("name").notNull(),
+
   description: text("description"),
+
   denomination: integer("denomination").notNull(),
+
   priceUsdt: numeric("price_usdt", {
     precision: 10,
     scale: 2,
   }).notNull(),
+
   imageUrl: text("image_url"),
-  active: boolean("active").notNull().default(true),
+
+  active: boolean("active")
+    .notNull()
+    .default(true),
+
   createdAt: timestamp("created_at", {
     withTimezone: true,
   })
@@ -53,9 +62,12 @@ export const giftCardCodes = pgTable("gift_card_codes", {
 export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
 
-  reference: text("reference").notNull().unique(),
+  reference: text("reference")
+    .notNull()
+    .unique(),
 
-  customerEmail: text("customer_email").notNull(),
+  // Opcional por ahora: la página de pago no pide correo.
+  customerEmail: text("customer_email"),
 
   totalUsdt: numeric("total_usdt", {
     precision: 10,
@@ -97,5 +109,6 @@ export const orderItems = pgTable("order_items", {
     scale: 2,
   }).notNull(),
 
-  quantity: integer("quantity").notNull(),
+  quantity: integer("quantity")
+    .notNull(),
 });
