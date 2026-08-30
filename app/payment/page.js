@@ -5,64 +5,143 @@ import { useEffect, useState } from "react";
 
 export default function PaymentPage() {
   const [cart, setCart] = useState([]);
-  const [email, setEmail] = useState("");
   const [order, setOrder] = useState(null);
-
-  const [creatingOrder, setCreatingOrder] =
-    useState(false);
-
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [paymentStatus, setPaymentStatus] =
     useState("waiting");
-
   const [deliveredCodes, setDeliveredCodes] =
     useState([]);
-
-  const [error, setError] = useState("");
-  const [verificationError, setVerificationError] =
-    useState("");
-
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    const savedCart = localStorage.getItem("qva_cart");
-
-    if (savedCart) {
-      try {
-        setCart(JSON.parse(savedCart));
-      } catch {
-        setCart([]);
-      }
-    }
-
-    /*
-     * Recuperamos la referencia si el cliente
-     * actualiza la página durante el pago.
-     */
-    const savedReference =
-      localStorage.getItem("qva_order_reference");
-
-    const savedTotal =
-      localStorage.getItem("qva_order_total");
-
-    if (savedReference && savedTotal) {
-      setOrder({
-        reference: savedReference,
-        totalUsdt: Number(savedTotal),
-      });
-    }
-  }, []);
-
-  const localTotal = cart.reduce(
-    (sum, item) => sum + Number(item.price || 0),
-    0
-  );
-
-  const total = order
-    ? Number(order.totalUsdt)
-    : localTotal;
 
   const walletAddress =
     process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS || "";
+
+  useEffect(() => {
+    async function startPayment() {
+      const savedCart =
+        localStorage.getItem("qva_cart");
+
+      const savedEmail =
+        localStorage.getItem("qva_customer_email");
+
+      const savedReference =
+        localStorage.getItem("qva_order_reference");
+
+      const savedTotal =
+        localStorage.getItem("qva_order_total");
+
+      let currentCart = [];
+
+      if (savedCart) {
+        try {
+          currentCart = JSON.parse(savedCart);
+          setCart(currentCart);
+        } catch {
+          currentCart = [];
+          setCart([]);
+        }
+      }
+
+      /*
+       * Si ya existe un pedido creado,
+       * lo recuperamos para no crear otro.
+       */
+      if (savedReference && savedTotal) {
+        setOrder({
+          reference: savedReference,
+          totalUsdt: Number(savedTotal),
+        });
+
+        setLoading(false);
+        return;
+      }
+
+      /*
+       * Debemos tener correo y productos.
+       */
+      if (!savedEmail || !currentCart.length) {
+        setError(
+          "Faltan datos del pedido. Regresa al carrito e inténtalo nuevamente."
+        );
+
+        setLoading(false);
+        return;
+      }
+
+      try {
+        /*
+         * Creamos el pedido automáticamente
+         * después de llegar desde Checkout.
+         */
+        const response = await fetch(
+          "/api/verify-payment/create-order",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              email: savedEmail,
+              cart: currentCart,
+            }),
+          }
+        );
+
+        /*
+         * Leemos primero como texto para evitar
+         * el error Unexpected token '<'.
+         */
+        const text = await response.text();
+
+        let data;
+
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(
+            "El servidor no respondió correctamente. Verifica la configuración de la API."
+          );
+        }
+
+        if (!response.ok || !data.ok) {
+          throw new Error(
+            data.error ||
+              "No se pudo crear el pedido."
+          );
+        }
+
+        setOrder(data.order);
+
+        localStorage.setItem(
+          "qva_order_reference",
+          data.order.reference
+        );
+
+        localStorage.setItem(
+          "qva_order_total",
+          String(data.order.totalUsdt)
+        );
+      } catch (err) {
+        setError(
+          err.message ||
+            "No se pudo crear el pedido."
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    startPayment();
+  }, []);
+
+  const total = order
+    ? Number(order.totalUsdt)
+    : cart.reduce(
+        (sum, item) =>
+          sum + Number(item.price || 0),
+        0
+      );
 
   const qrUrl = walletAddress
     ? `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(
@@ -70,75 +149,10 @@ export default function PaymentPage() {
       )}`
     : "";
 
-  async function createOrder() {
-    if (!email.trim()) {
-      setError(
-        "Introduce tu correo electrónico para continuar."
-      );
-      return;
-    }
-
-    if (!cart.length) {
-      setError("Tu carrito está vacío.");
-      return;
-    }
-
-    setCreatingOrder(true);
-    setError("");
-
-    try {
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: email.trim(),
-          cart,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.ok) {
-        throw new Error(
-          data.error ||
-            "No se pudo crear el pedido."
-        );
-      }
-
-      setOrder(data.order);
-
-      /*
-       * Guardamos la información necesaria para
-       * recuperar el pedido si se recarga la página.
-       */
-      localStorage.setItem(
-        "qva_order_reference",
-        data.order.reference
-      );
-
-      localStorage.setItem(
-        "qva_order_total",
-        String(data.order.totalUsdt)
-      );
-
-    } catch (error) {
-      setError(
-        error.message ||
-          "Ocurrió un error al crear el pedido."
-      );
-    } finally {
-      setCreatingOrder(false);
-    }
-  }
-
   async function verifyPayment() {
     if (!order?.reference) return;
 
     try {
-      setVerificationError("");
-
       const response = await fetch(
         "/api/verify-payment",
         {
@@ -152,7 +166,17 @@ export default function PaymentPage() {
         }
       );
 
-      const data = await response.json();
+      const text = await response.text();
+
+      let data;
+
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(
+          "Error al verificar el pago."
+        );
+      }
 
       if (!response.ok || !data.ok) {
         throw new Error(
@@ -163,15 +187,8 @@ export default function PaymentPage() {
 
       if (data.delivered) {
         setPaymentStatus("delivered");
+        setDeliveredCodes(data.codes || []);
 
-        setDeliveredCodes(
-          data.codes || []
-        );
-
-        /*
-         * El pedido fue entregado, por lo que
-         * limpiamos el carrito.
-         */
         localStorage.removeItem("qva_cart");
 
         return;
@@ -183,19 +200,18 @@ export default function PaymentPage() {
       }
 
       setPaymentStatus("waiting");
-
-    } catch (error) {
-      setVerificationError(
-        error.message ||
-          "No se pudo verificar el pago."
-      );
+    } catch {
+      /*
+       * Si hay un error temporal,
+       * la verificación automática
+       * volverá a intentarlo.
+       */
     }
   }
 
   /*
-   * Verificación automática del pago.
-   * Revisamos inmediatamente y después cada
-   * 15 segundos mientras el pedido esté activo.
+   * Verificamos automáticamente
+   * cada 15 segundos.
    */
   useEffect(() => {
     if (!order?.reference) return;
@@ -208,13 +224,8 @@ export default function PaymentPage() {
       verifyPayment();
     }, 15000);
 
-    return () => {
-      clearInterval(interval);
-    };
-  }, [
-    order?.reference,
-    paymentStatus,
-  ]);
+    return () => clearInterval(interval);
+  }, [order?.reference, paymentStatus]);
 
   async function copyAddress() {
     if (!walletAddress) return;
@@ -229,7 +240,6 @@ export default function PaymentPage() {
       setTimeout(() => {
         setCopied(false);
       }, 2000);
-
     } catch {
       alert("No se pudo copiar la dirección.");
     }
@@ -254,7 +264,7 @@ export default function PaymentPage() {
 
           <div className="checkout-heading">
             <p className="checkout-step">
-              PAGO
+              PASO 2 DE 2
             </p>
 
             <h1>
@@ -267,69 +277,39 @@ export default function PaymentPage() {
             </p>
           </div>
 
-          {/* CORREO Y CREACIÓN DEL PEDIDO */}
-
-          {!order && (
+          {loading && (
             <section className="checkout-box">
-
               <h2 className="payment-section-title">
-                Información de contacto
+                Preparando tu pedido...
               </h2>
 
               <p className="payment-text">
-                Introduce tu correo para enviarte la
-                información de tu pedido y ayudarte en
-                caso de cualquier inconveniente.
+                ⏳ Estamos creando tu pedido de forma
+                segura.
               </p>
-
-              <label className="checkout-label">
-                Correo electrónico
-              </label>
-
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  setError("");
-                }}
-                placeholder="tu@email.com"
-                className="checkout-input"
-              />
-
-              {error && (
-                <p
-                  style={{
-                    marginTop: "12px",
-                    color: "#e57373",
-                    fontSize: "14px",
-                  }}
-                >
-                  ⚠️ {error}
-                </p>
-              )}
-
-              <button
-                type="button"
-                className="checkout-primary-button payment-submit"
-                onClick={createOrder}
-                disabled={
-                  creatingOrder ||
-                  !email.trim() ||
-                  !cart.length
-                }
-              >
-                {creatingOrder
-                  ? "⏳ CREANDO PEDIDO..."
-                  : "CONTINUAR AL PAGO →"}
-              </button>
-
             </section>
           )}
 
-          {/* INFORMACIÓN DEL PAGO */}
+          {error && (
+            <section className="checkout-box">
+              <h2 className="payment-section-title">
+                Ocurrió un problema
+              </h2>
 
-          {order && (
+              <p className="payment-text">
+                ⚠️ {error}
+              </p>
+
+              <Link
+                href="/checkout"
+                className="checkout-primary-button"
+              >
+                ← VOLVER AL CHECKOUT
+              </Link>
+            </section>
+          )}
+
+          {!loading && !error && order && (
             <>
               <section className="checkout-box payment-total-box">
 
@@ -366,8 +346,6 @@ export default function PaymentPage() {
 
               </section>
 
-              {/* MÉTODO */}
-
               <section className="checkout-box">
 
                 <h2 className="payment-section-title">
@@ -377,24 +355,7 @@ export default function PaymentPage() {
                 <div className="payment-method">
 
                   <div className="payment-method-icon">
-                    <svg
-                      width="46"
-                      height="46"
-                      viewBox="0 0 64 64"
-                      aria-label="USDT"
-                    >
-                      <circle
-                        cx="32"
-                        cy="32"
-                        r="30"
-                        fill="#26A17B"
-                      />
-
-                      <path
-                        d="M14 17h36v7H37v5.5c7.8.6 13 2.4 13 4.6 0 2.8-8 5-18 5s-18-2.2-18-5c0-2.2 5.2-4 13-4.6V24H14v-7zm18 16c-7.5 0-12.5.8-12.5 1.7 0 .9 5 1.8 12.5 1.8s12.5-.9 12.5-1.8c0-.9-5-1.7-12.5-1.7z"
-                        fill="white"
-                      />
-                    </svg>
+                    💲
                   </div>
 
                   <div>
@@ -411,8 +372,6 @@ export default function PaymentPage() {
 
               </section>
 
-              {/* QR + DIRECCIÓN */}
-
               <section className="checkout-box">
 
                 <h2 className="payment-section-title">
@@ -424,7 +383,7 @@ export default function PaymentPage() {
                   <strong>
                     {total.toFixed(2)} USDT
                   </strong>{" "}
-                  a la dirección indicada.
+                  a la siguiente dirección.
                 </p>
 
                 <div className="payment-qr-card">
@@ -444,7 +403,8 @@ export default function PaymentPage() {
                 </div>
 
                 <p className="qr-caption">
-                  Escanea para copiar la dirección de pago
+                  Escanea el código QR para obtener
+                  la dirección de pago.
                 </p>
 
                 <div className="payment-address-box">
@@ -475,8 +435,6 @@ export default function PaymentPage() {
 
               </section>
 
-              {/* VERIFICACIÓN AUTOMÁTICA */}
-
               <section className="checkout-box">
 
                 <h2 className="payment-section-title">
@@ -485,38 +443,34 @@ export default function PaymentPage() {
 
                 {paymentStatus === "waiting" && (
                   <div className="payment-warning">
-                    ⏳{" "}
-                    <strong>
+                    ⏳ <strong>
                       Esperando confirmación del pago...
                     </strong>
 
                     <br />
 
-                    Nuestro sistema revisa
+                    Nuestro sistema está verificando
                     automáticamente la recepción del
-                    USDT. No es necesario introducir
-                    ningún TX Hash.
+                    USDT.
                   </div>
                 )}
 
                 {paymentStatus === "paid" && (
                   <div className="payment-warning">
-                    ✅{" "}
-                    <strong>
+                    ✅ <strong>
                       ¡Pago confirmado!
                     </strong>
 
                     <br />
 
-                    Estamos preparando y entregando
-                    automáticamente tu pedido.
+                    Estamos preparando la entrega de tu
+                    pedido.
                   </div>
                 )}
 
                 {paymentStatus === "delivered" && (
                   <div className="payment-warning">
-                    🎉{" "}
-                    <strong>
+                    🎉 <strong>
                       ¡Pedido entregado correctamente!
                     </strong>
 
@@ -541,18 +495,6 @@ export default function PaymentPage() {
                   </div>
                 )}
 
-                {verificationError && (
-                  <p
-                    style={{
-                      marginTop: "12px",
-                      color: "#e57373",
-                      fontSize: "14px",
-                    }}
-                  >
-                    ⚠️ {verificationError}
-                  </p>
-                )}
-
               </section>
             </>
           )}
@@ -565,8 +507,6 @@ export default function PaymentPage() {
           </Link>
 
         </div>
-
-        {/* RESUMEN DEL PEDIDO */}
 
         <aside className="checkout-summary">
 
@@ -584,11 +524,11 @@ export default function PaymentPage() {
           <div className="summary-items">
 
             {cart.map((item, index) => (
-
               <div
                 className="summary-item"
                 key={`${item.id || item.diamonds}-${index}`}
               >
+
                 <span>
                   💎 {item.diamonds} Diamonds
                 </span>
@@ -598,8 +538,8 @@ export default function PaymentPage() {
                     item.price || 0
                   ).toFixed(2)} USDT
                 </strong>
-              </div>
 
+              </div>
             ))}
 
           </div>
@@ -641,4 +581,4 @@ export default function PaymentPage() {
 
     </main>
   );
-    }
+}
