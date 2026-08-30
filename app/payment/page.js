@@ -22,6 +22,17 @@ export default function PaymentPage() {
   const walletAddress =
     process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS || "";
 
+  /*
+   * Borra únicamente los datos del pedido actual.
+   * El carrito se mantiene para que el cliente pueda
+   * regresar y crear un pedido nuevo.
+   */
+  function clearExpiredOrder() {
+    localStorage.removeItem("qva_order_reference");
+    localStorage.removeItem("qva_order_total");
+    localStorage.removeItem("qva_order_expires_at");
+  }
+
   useEffect(() => {
     async function startPayment() {
       const savedCart =
@@ -52,22 +63,37 @@ export default function PaymentPage() {
       }
 
       /*
-       * Si ya existe un pedido creado,
-       * lo recuperamos desde localStorage.
+       * Si existe un pedido guardado, primero
+       * comprobamos si todavía está vigente.
        */
       if (
         savedReference &&
         savedTotal &&
         savedExpiresAt
       ) {
-        setOrder({
-          reference: savedReference,
-          totalUsdt: Number(savedTotal),
-          expiresAt: savedExpiresAt,
-        });
+        const expiresTime =
+          new Date(savedExpiresAt).getTime();
 
-        setLoading(false);
-        return;
+        const isExpired =
+          !Number.isFinite(expiresTime) ||
+          expiresTime <= Date.now();
+
+        /*
+         * Si el pedido ya venció, eliminamos sus
+         * datos para que no vuelva a aparecer.
+         */
+        if (isExpired) {
+          clearExpiredOrder();
+        } else {
+          setOrder({
+            reference: savedReference,
+            totalUsdt: Number(savedTotal),
+            expiresAt: savedExpiresAt,
+          });
+
+          setLoading(false);
+          return;
+        }
       }
 
       /*
@@ -84,7 +110,7 @@ export default function PaymentPage() {
 
       try {
         /*
-         * Creamos el pedido automáticamente.
+         * Creamos un nuevo pedido automáticamente.
          */
         const response = await fetch(
           "/api/verify-payment/create-order",
@@ -171,6 +197,13 @@ export default function PaymentPage() {
 
       if (remaining <= 0) {
         setPaymentStatus("expired");
+
+        /*
+         * MUY IMPORTANTE:
+         * Eliminamos el pedido vencido del navegador
+         * para que no aparezca nuevamente.
+         */
+        clearExpiredOrder();
       }
     }
 
@@ -244,8 +277,13 @@ export default function PaymentPage() {
         );
       }
 
+      /*
+       * Si el servidor informa que el pedido venció,
+       * también eliminamos sus datos guardados.
+       */
       if (data.expired) {
         setPaymentStatus("expired");
+        clearExpiredOrder();
         return;
       }
 
@@ -256,7 +294,12 @@ export default function PaymentPage() {
           data.codes || []
         );
 
+        /*
+         * Al entregarse correctamente eliminamos
+         * los datos del carrito y del pedido.
+         */
         localStorage.removeItem("qva_cart");
+        clearExpiredOrder();
 
         return;
       }
@@ -355,7 +398,8 @@ export default function PaymentPage() {
               </h2>
 
               <p className="payment-text">
-                ⏳ Estamos creando tu pedido de forma segura.
+                ⏳ Estamos creando tu pedido de forma
+                segura.
               </p>
             </section>
           )}
@@ -509,7 +553,8 @@ export default function PaymentPage() {
                     <br />
 
                     Nuestro sistema está verificando
-                    automáticamente la recepción del USDT.
+                    automáticamente la recepción del
+                    USDT.
                   </div>
                 )}
 
@@ -529,8 +574,8 @@ export default function PaymentPage() {
 
                     <br />
 
-                    El tiempo de pago finalizó y la reserva
-                    de los códigos fue liberada.
+                    El tiempo de pago finalizó. Regresa
+                    al carrito para crear un nuevo pedido.
                   </div>
                 )}
 
@@ -568,9 +613,18 @@ export default function PaymentPage() {
 
           <Link
             href="/cart"
-            className="back-link"
+            className="checkout-primary-button"
+            style={{
+              display: "block",
+              width: "100%",
+              textAlign: "center",
+              marginTop: "30px",
+              padding: "18px",
+              fontSize: "16px",
+              fontWeight: "bold",
+            }}
           >
-            ← Volver al carrito
+            🛒 VOLVER AL CARRITO
           </Link>
 
         </div>
@@ -623,4 +677,4 @@ export default function PaymentPage() {
 
     </main>
   );
-            }
+        }
