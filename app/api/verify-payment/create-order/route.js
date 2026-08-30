@@ -11,8 +11,13 @@ export async function POST(request) {
   try {
     const body = await request.json();
 
-    const email = String(body?.email || "").trim();
-    const cart = Array.isArray(body?.cart) ? body.cart : [];
+    const email = String(body?.email || "")
+      .trim()
+      .toLowerCase();
+
+    const cart = Array.isArray(body?.cart)
+      ? body.cart
+      : [];
 
     if (!email) {
       return NextResponse.json(
@@ -35,17 +40,16 @@ export async function POST(request) {
     }
 
     /*
-     * No confiamos en los precios enviados
-     * por el navegador.
-     *
-     * Buscamos los productos reales en Neon
-     * y calculamos el total desde la base de datos.
+     * No confiamos en los precios enviados por
+     * el navegador. Consultamos los productos
+     * reales en la base de datos.
      */
-
     const validatedItems = [];
 
     for (const item of cart) {
-      const productId = Number(item?.productId);
+      const productId = Number(
+        item?.productId || item?.id
+      );
 
       if (!Number.isInteger(productId)) {
         return NextResponse.json(
@@ -67,7 +71,8 @@ export async function POST(request) {
         return NextResponse.json(
           {
             ok: false,
-            error: "Uno de los productos ya no está disponible.",
+            error:
+              "Uno de los productos ya no está disponible.",
           },
           { status: 400 }
         );
@@ -75,7 +80,7 @@ export async function POST(request) {
 
       const quantity = Math.max(
         1,
-        Number(item?.quantity || 1)
+        Math.floor(Number(item?.quantity) || 1)
       );
 
       validatedItems.push({
@@ -84,6 +89,10 @@ export async function POST(request) {
       });
     }
 
+    /*
+     * Calculamos el total usando los precios
+     * reales de la base de datos.
+     */
     const total = validatedItems.reduce(
       (sum, item) =>
         sum +
@@ -93,7 +102,8 @@ export async function POST(request) {
     );
 
     /*
-     * Referencia única del pedido.
+     * Creamos una referencia única para
+     * identificar el pedido.
      */
     const reference =
       "QVA-" +
@@ -105,7 +115,8 @@ export async function POST(request) {
         .toUpperCase();
 
     /*
-     * Creamos el pedido.
+     * Creamos el pedido y guardamos
+     * el correo del cliente.
      */
     const [order] = await db
       .insert(orders)
@@ -118,15 +129,17 @@ export async function POST(request) {
       .returning();
 
     /*
-     * Guardamos los productos del pedido.
+     * Guardamos todos los productos
+     * pertenecientes al pedido.
      */
     for (const item of validatedItems) {
       await db.insert(orderItems).values({
         orderId: order.id,
         productId: item.product.id,
         productName: item.product.name,
-        unitPriceUsdt:
-          Number(item.product.priceUsdt).toFixed(2),
+        unitPriceUsdt: Number(
+          item.product.priceUsdt
+        ).toFixed(2),
         quantity: item.quantity,
       });
     }
@@ -136,6 +149,7 @@ export async function POST(request) {
       order: {
         id: order.id,
         reference: order.reference,
+        customerEmail: order.customerEmail,
         totalUsdt: Number(order.totalUsdt),
         status: order.status,
       },
@@ -151,4 +165,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-  }
+}
