@@ -7,7 +7,7 @@ import {
   giftCardCodes,
 } from "../../../db/schema";
 
-const USDT_DECIMALS = 6;
+const USDT_DECIMALS = 18;
 
 export async function POST(request) {
   try {
@@ -41,8 +41,8 @@ export async function POST(request) {
       );
     }
 
-    // Si el pedido ya fue entregado, no volvemos
-    // a entregar los códigos.
+    // Si ya fue entregado, devolvemos los códigos
+    // sin volver a entregar otros.
     if (order.status === "delivered") {
       const deliveredCodes = await db
         .select({
@@ -65,7 +65,6 @@ export async function POST(request) {
       process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS;
 
     const apiKey = process.env.BSCSCAN_API_KEY;
-
     const usdtContract =
       process.env.USDT_BEP20_CONTRACT;
 
@@ -80,8 +79,8 @@ export async function POST(request) {
       );
     }
 
-    // Consultamos las transferencias USDT BEP-20
-    // recibidas por la billetera.
+    // Consultamos las transferencias de USDT BEP-20
+    // recibidas por nuestra billetera.
     const url =
       `https://api.bscscan.com/api` +
       `?module=account` +
@@ -122,10 +121,11 @@ export async function POST(request) {
 
     const destination = wallet.toLowerCase();
 
-    // Convertimos el precio esperado a unidades mínimas
-    // de USDT.
+    // BscScan devuelve el valor en la unidad mínima
+    // del token. USDT BEP-20 utiliza 18 decimales.
     const requiredAmount =
-      Number(order.totalUsdt) * 10 ** USDT_DECIMALS;
+      Number(order.totalUsdt) *
+      10 ** USDT_DECIMALS;
 
     let matchingTransaction = null;
 
@@ -165,8 +165,8 @@ export async function POST(request) {
         continue;
       }
 
-      // Evitamos que una misma transacción pueda
-      // pagar más de un pedido.
+      // Evitamos utilizar la misma transacción
+      // para pagar dos pedidos diferentes.
       const [alreadyUsed] = await db
         .select({
           id: orders.id,
@@ -210,7 +210,7 @@ export async function POST(request) {
       .from(orderItems)
       .where(eq(orderItems.orderId, order.id));
 
-    // Calculamos cuántos códigos necesitamos entregar.
+    // Cantidad total de códigos que debemos entregar.
     const totalCodesNeeded = items.reduce(
       (sum, item) =>
         sum + Number(item.quantity),
@@ -219,7 +219,7 @@ export async function POST(request) {
 
     const deliveredCodes = [];
 
-    // Entregamos un código por cada unidad.
+    // Entregamos un código por cada unidad comprada.
     for (const item of items) {
       for (
         let i = 0;
@@ -277,8 +277,6 @@ export async function POST(request) {
       }
     }
 
-    // Solo marcamos como entregado si todos los códigos
-    // necesarios fueron entregados.
     const delivered =
       deliveredCodes.length === totalCodesNeeded;
 
@@ -317,4 +315,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-      }
+}
