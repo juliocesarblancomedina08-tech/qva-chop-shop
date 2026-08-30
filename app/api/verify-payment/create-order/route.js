@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "../../../../lib/db";
+import { db } from "../../../lib/db";
 import {
   orders,
   orderItems,
   products,
-} from "../../../../db/schema";
+} from "../../../db/schema";
 import { eq } from "drizzle-orm";
 
 export async function POST(request) {
@@ -39,11 +39,6 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * No confiamos en los precios enviados por
-     * el navegador. Consultamos los productos
-     * reales en la base de datos.
-     */
     const validatedItems = [];
 
     for (const item of cart) {
@@ -89,10 +84,6 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * Calculamos el total usando los precios
-     * reales de la base de datos.
-     */
     const total = validatedItems.reduce(
       (sum, item) =>
         sum +
@@ -101,10 +92,6 @@ export async function POST(request) {
       0
     );
 
-    /*
-     * Creamos una referencia única para
-     * identificar el pedido.
-     */
     const reference =
       "QVA-" +
       Date.now().toString(36).toUpperCase() +
@@ -114,10 +101,6 @@ export async function POST(request) {
         .substring(2, 8)
         .toUpperCase();
 
-    /*
-     * Creamos el pedido y guardamos
-     * el correo del cliente.
-     */
     const [order] = await db
       .insert(orders)
       .values({
@@ -128,10 +111,6 @@ export async function POST(request) {
       })
       .returning();
 
-    /*
-     * Guardamos todos los productos
-     * pertenecientes al pedido.
-     */
     for (const item of validatedItems) {
       await db.insert(orderItems).values({
         orderId: order.id,
