@@ -78,10 +78,13 @@ export const orders = pgTable("orders", {
     scale: 8,
   }).notNull(),
 
-  paymentAmountUsdt: numeric("payment_amount_usdt", {
-    precision: 12,
-    scale: 8,
-  }).notNull(),
+  paymentAmountUsdt: numeric(
+    "payment_amount_usdt",
+    {
+      precision: 12,
+      scale: 8,
+    }
+  ).notNull(),
 
   status: text("status")
     .notNull()
