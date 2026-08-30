@@ -7,13 +7,35 @@ import {
   giftCardCodes,
 } from "../../../../db/schema";
 
-const USDT_DECIMALS = 6;
+const BSC_CHAIN_ID = "56";
+const USDT_DECIMALS = 18;
+
+function toTokenUnits(amount, decimals) {
+  const value = String(amount).trim();
+
+  if (!/^\d+(\.\d+)?$/.test(value)) {
+    throw new Error("Cantidad de USDT inválida.");
+  }
+
+  const [whole, fraction = ""] = value.split(".");
+
+  const paddedFraction = (
+    fraction + "0".repeat(decimals)
+  ).slice(0, decimals);
+
+  return (
+    BigInt(whole) * 10n ** BigInt(decimals) +
+    BigInt(paddedFraction || "0")
+  );
+}
 
 export async function POST(request) {
   try {
     const body = await request.json();
 
-    const orderReference = body?.orderReference;
+    const orderReference = String(
+      body?.orderReference || ""
+    ).trim();
 
     if (!orderReference) {
       return NextResponse.json(
@@ -42,8 +64,8 @@ export async function POST(request) {
     }
 
     /*
-     * Si el pedido ya fue entregado, devolvemos
-     * los códigos sin volver a entregarlos.
+     * Si ya fue entregado, devolvemos los códigos
+     * sin volver a entregar otros.
      */
     if (order.status === "delivered") {
       const deliveredCodes = await db
@@ -59,6 +81,7 @@ export async function POST(request) {
         paid: true,
         delivered: true,
         codes: deliveredCodes,
+        message: "Este pedido ya fue entregado.",
       });
     }
 
@@ -83,19 +106,20 @@ export async function POST(request) {
     }
 
     /*
-     * Consultamos las transferencias USDT BEP-20
-     * recibidas por nuestra billetera.
+     * Consultamos las transferencias ERC-20
+     * usando Etherscan API V2 para BNB Smart Chain.
      */
     const url =
-      `https://api.bscscan.com/api` +
-      `?module=account` +
+      `https://api.etherscan.io/v2/api` +
+      `?chainid=${BSC_CHAIN_ID}` +
+      `&module=account` +
       `&action=tokentx` +
       `&contractaddress=${encodeURIComponent(
         usdtContract
       )}` +
       `&address=${encodeURIComponent(wallet)}` +
       `&page=1` +
-      `&offset=50` +
+      `&offset=100` +
       `&sort=desc` +
       `&apikey=${encodeURIComponent(apiKey)}`;
 
@@ -107,7 +131,8 @@ export async function POST(request) {
       return NextResponse.json(
         {
           ok: false,
-          error: "No se pudo consultar BscScan.",
+          error:
+            "No se pudo consultar el servicio de verificación.",
         },
         { status: 502 }
       );
@@ -115,6 +140,10 @@ export async function POST(request) {
 
     const data = await response.json();
 
+    /*
+     * Cuando no hay transacciones, la API puede
+     * devolver un resultado que no sea un array.
+     */
     if (!Array.isArray(data.result)) {
       return NextResponse.json({
         ok: true,
@@ -127,10 +156,13 @@ export async function POST(request) {
     const destination = wallet.toLowerCase();
 
     /*
-     * Cantidad exacta que esperamos recibir.
+     * Convertimos el total del pedido a unidades
+     * completas del token sin perder precisión.
      */
-    const requiredAmount =
-      Number(order.totalUsdt) * 10 ** USDT_DECIMALS;
+    const requiredAmount = toTokenUnits(
+      order.totalUsdt,
+      USDT_DECIMALS
+    );
 
     let matchingTransaction = null;
 
@@ -142,8 +174,6 @@ export async function POST(request) {
       const txContract = String(
         tx.contractAddress || ""
       ).toLowerCase();
-
-      const txValue = Number(tx.value || 0);
 
       const confirmations = Number(
         tx.confirmations || 0
@@ -157,7 +187,27 @@ export async function POST(request) {
       }
 
       /*
-       * El pago debe ser suficiente.
+       * Verificamos que el token recibido tenga
+       * exactamente 18 decimales.
+       */
+      const tokenDecimals = Number(
+        tx.tokenDecimal || USDT_DECIMALS
+      );
+
+      if (tokenDecimals !== USDT_DECIMALS) {
+        continue;
+      }
+
+      let txValue;
+
+      try {
+        txValue = BigInt(String(tx.value || "0"));
+      } catch {
+        continue;
+      }
+
+      /*
+       * El pago debe ser igual o mayor al total.
        */
       if (txValue < requiredAmount) {
         continue;
@@ -170,14 +220,14 @@ export async function POST(request) {
         continue;
       }
 
-      const txHash = tx.hash;
+      const txHash = String(tx.hash || "").trim();
 
       if (!txHash) {
         continue;
       }
 
       /*
-       * No permitimos utilizar la misma transacción
+       * Una misma transacción no puede utilizarse
        * para pagar dos pedidos.
        */
       const [alreadyUsed] = await db
@@ -201,11 +251,13 @@ export async function POST(request) {
         ok: true,
         paid: false,
         delivered: false,
-        message: "Esperando el pago...",
+        message: "Esperando confirmación del pago...",
       });
     }
 
-    const txHash = matchingTransaction.hash;
+    const txHash = String(
+      matchingTransaction.hash
+    ).trim();
 
     /*
      * Marcamos el pedido como pagado.
@@ -228,8 +280,7 @@ export async function POST(request) {
       .where(eq(orderItems.orderId, order.id));
 
     /*
-     * Calculamos la cantidad total de códigos que
-     * necesitamos entregar.
+     * Cantidad total de códigos necesarios.
      */
     const totalCodesNeeded = items.reduce(
       (sum, item) =>
@@ -266,8 +317,8 @@ export async function POST(request) {
           .limit(1);
 
         /*
-         * Si no hay códigos disponibles, continuamos
-         * sin marcar el pedido como entregado.
+         * No hay códigos disponibles para este
+         * producto.
          */
         if (!availableCode) {
           continue;
@@ -307,8 +358,8 @@ export async function POST(request) {
     }
 
     /*
-     * Solo marcamos como entregado si conseguimos
-     * todos los códigos necesarios.
+     * Solo marcamos el pedido como entregado si
+     * conseguimos todos los códigos necesarios.
      */
     const delivered =
       deliveredCodes.length === totalCodesNeeded;
@@ -348,4 +399,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-                 }
+             }
