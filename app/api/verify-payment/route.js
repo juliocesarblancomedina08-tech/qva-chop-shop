@@ -7,14 +7,8 @@ import {
   giftCardCodes,
 } from "../../../db/schema";
 
-/*
- * USDT BEP-20 utiliza 18 decimales.
- */
 const USDT_DECIMALS = 18;
 
-/*
- * Firma del evento Transfer(address,address,uint256)
- */
 const TRANSFER_TOPIC =
   "0xddf252ad1be2c89b69c2b068fc378daa" +
   "952ba7f163c4a11628f55a4df523b3ef";
@@ -66,9 +60,6 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * Buscamos el pedido.
-     */
     const [order] = await db
       .select()
       .from(orders)
@@ -85,10 +76,6 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * Si ya fue entregado, devolvemos siempre
-     * los códigos que pertenecen a este pedido.
-     */
     if (order.status === "delivered") {
       const deliveredCodes = await db
         .select({
@@ -112,9 +99,6 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * Un pedido vencido no puede volver a usarse.
-     */
     if (order.status === "expired") {
       return NextResponse.json({
         ok: true,
@@ -125,19 +109,12 @@ export async function POST(request) {
       });
     }
 
-    /*
-     * Comprobamos el tiempo límite.
-     */
     const now = new Date();
 
     if (
       order.expiresAt &&
-      now.getTime() >=
-        new Date(order.expiresAt).getTime()
+      now.getTime() >= new Date(order.expiresAt).getTime()
     ) {
-      /*
-       * Liberamos los códigos reservados.
-       */
       await db
         .update(giftCardCodes)
         .set({
@@ -164,67 +141,61 @@ export async function POST(request) {
         paid: false,
         delivered: false,
         expired: true,
-        message:
-          "El tiempo para realizar el pago ha terminado.",
+        message: "El tiempo para realizar el pago ha terminado.",
       });
     }
 
-    /*
-     * Variables de configuración.
-     */
-    const rpcUrl =
-      process.env.BSC_RPC_URL;
+    const rpcUrl = process.env.BSC_RPC_URL;
 
     const wallet =
       process.env.STORE_WALLET_ADDRESS ||
       process.env.NEXT_PUBLIC_STORE_WALLET_ADDRESS;
 
-    const usdtContract =
-      process.env.USDT_BEP20_CONTRACT;
+    const usdtContract = process.env.USDT_BEP20_CONTRACT;
 
-    if (
-      !rpcUrl ||
-      !wallet ||
-      !usdtContract
-    ) {
+    if (!rpcUrl || !wallet || !usdtContract) {
       return NextResponse.json(
         {
           ok: false,
-          error:
-            "Faltan variables de configuración del pago.",
+          error: "Faltan variables de configuración del pago.",
         },
         { status: 500 }
       );
     }
 
-    const destination =
-      wallet.toLowerCase();
+    const destination = wallet.toLowerCase();
+    const contract = usdtContract.toLowerCase();
 
-    const contract =
-      usdtContract.toLowerCase();
+    const latestBlockResponse = await fetch(rpcUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_blockNumber",
+        params: [],
+        id: 1,
+      }),
+      cache: "no-store",
+    });
 
-    /*
-     * Consultamos el bloque más reciente.
-     */
-    const latestBlockResponse = await fetch(
-      rpcUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+    if (!latestBlockResponse.ok) {
+      console.error(
+        "RPC_HTTP_ERROR:",
+        latestBlockResponse.status
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "No se pudo conectar con la blockchain.",
         },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          method: "eth_blockNumber",
-          params: [],
-          id: 1,
-        }),
-        cache: "no-store",
-      }
-    );
+        { status: 502 }
+      );
+    }
 
-    const latestBlockData =
-      await latestBlockResponse.json();
+    const latestBlockData = await latestBlockResponse.json();
 
     if (
       !latestBlockData.result ||
@@ -237,8 +208,7 @@ export async function POST(request) {
 
       return NextResponse.json({
         ok: false,
-        error:
-          "No se pudo consultar la blockchain.",
+        error: "No se pudo consultar la blockchain.",
       });
     }
 
@@ -247,52 +217,52 @@ export async function POST(request) {
       16
     );
 
-    /*
-     * Buscamos solamente transferencias recientes.
-     * BSC produce bloques rápidamente, por lo que
-     * este rango cubre aproximadamente varios minutos.
-     */
     const fromBlock = Math.max(
       0,
       latestBlock - 500
     );
 
-    /*
-     * Buscamos eventos Transfer de USDT que
-     * tengan como destinatario nuestra billetera.
-     */
-    const logsResponse = await fetch(
-      rpcUrl,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          method: "eth_getLogs",
-          params: [
-            {
-              fromBlock: formatRpcHex(
-                fromBlock
-              ),
-              toBlock: "latest",
-              address: contract,
-              topics: [
-                TRANSFER_TOPIC,
-                null,
-                toAddressTopic(destination),
-              ],
-            },
-          ],
-          id: 2,
-        }),
-        cache: "no-store",
-      }
-    );
+    const logsResponse = await fetch(rpcUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "eth_getLogs",
+        params: [
+          {
+            fromBlock: formatRpcHex(fromBlock),
+            toBlock: "latest",
+            address: contract,
+            topics: [
+              TRANSFER_TOPIC,
+              null,
+              toAddressTopic(destination),
+            ],
+          },
+        ],
+        id: 2,
+      }),
+      cache: "no-store",
+    });
 
-    const logsData =
-      await logsResponse.json();
+    if (!logsResponse.ok) {
+      console.error(
+        "RPC_LOGS_HTTP_ERROR:",
+        logsResponse.status
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "No se pudieron consultar los pagos.",
+        },
+        { status: 502 }
+      );
+    }
+
+    const logsData = await logsResponse.json();
 
     if (
       logsData.error ||
@@ -305,53 +275,39 @@ export async function POST(request) {
 
       return NextResponse.json({
         ok: false,
-        error:
-          "No se pudieron consultar los pagos.",
+        error: "No se pudieron consultar los pagos.",
       });
     }
 
-    /*
-     * Cantidad exacta requerida por el pedido.
-     */
-    const requiredValue =
-      decimalToUnits(
-        order.totalUsdt,
-        USDT_DECIMALS
-      );
+    const requiredValue = decimalToUnits(
+      order.totalUsdt,
+      USDT_DECIMALS
+    );
 
     let matchingLog = null;
 
     for (const log of logsData.result) {
       try {
-        const txHash =
-          String(log.transactionHash || "");
+        const txHash = String(
+          log.transactionHash || ""
+        );
 
         if (!txHash) {
           continue;
         }
 
-        /*
-         * Evitamos reutilizar una transacción
-         * que ya pagó otro pedido.
-         */
         const [alreadyUsed] = await db
           .select({
             id: orders.id,
           })
           .from(orders)
-          .where(
-            eq(orders.txHash, txHash)
-          )
+          .where(eq(orders.txHash, txHash))
           .limit(1);
 
         if (alreadyUsed) {
           continue;
         }
 
-        /*
-         * El valor está en el campo data
-         * del evento Transfer.
-         */
         const value = BigInt(
           log.data || "0x0"
         );
@@ -370,9 +326,6 @@ export async function POST(request) {
       }
     }
 
-    /*
-     * Todavía no encontramos un pago.
-     */
     if (!matchingLog) {
       return NextResponse.json({
         ok: true,
@@ -386,9 +339,6 @@ export async function POST(request) {
     const txHash =
       matchingLog.transactionHash;
 
-    /*
-     * Marcamos el pedido como pagado.
-     */
     await db
       .update(orders)
       .set({
@@ -398,46 +348,29 @@ export async function POST(request) {
       })
       .where(eq(orders.id, order.id));
 
-    /*
-     * Buscamos únicamente los códigos que
-     * estaban reservados para este pedido.
-     */
     const reservedCodes = await db
       .select()
       .from(giftCardCodes)
       .where(
         and(
-          eq(
-            giftCardCodes.orderId,
-            order.id
-          ),
-          eq(
-            giftCardCodes.status,
-            "reserved"
-          )
+          eq(giftCardCodes.orderId, order.id),
+          eq(giftCardCodes.status, "reserved")
         )
       );
 
     const items = await db
       .select()
       .from(orderItems)
-      .where(
-        eq(
-          orderItems.orderId,
-          order.id
-        )
-      );
+      .where(eq(orderItems.orderId, order.id));
 
-    const totalCodesNeeded =
-      items.reduce(
-        (sum, item) =>
-          sum + Number(item.quantity),
-        0
-      );
+    const totalCodesNeeded = items.reduce(
+      (sum, item) =>
+        sum + Number(item.quantity),
+      0
+    );
 
     if (
-      reservedCodes.length !==
-      totalCodesNeeded
+      reservedCodes.length !== totalCodesNeeded
     ) {
       return NextResponse.json(
         {
@@ -451,10 +384,6 @@ export async function POST(request) {
       );
     }
 
-    /*
-     * Entregamos exclusivamente los códigos
-     * que fueron reservados.
-     */
     const deliveredCodes = [];
 
     for (const reservedCode of reservedCodes) {
@@ -484,16 +413,14 @@ export async function POST(request) {
 
       if (updatedCode) {
         deliveredCodes.push({
-          productId:
-            updatedCode.productId,
+          productId: updatedCode.productId,
           code: updatedCode.code,
         });
       }
     }
 
     const delivered =
-      deliveredCodes.length ===
-      totalCodesNeeded;
+      deliveredCodes.length === totalCodesNeeded;
 
     if (delivered) {
       await db
@@ -502,9 +429,7 @@ export async function POST(request) {
           status: "delivered",
           deliveredAt: new Date(),
         })
-        .where(
-          eq(orders.id, order.id)
-        );
+        .where(eq(orders.id, order.id));
     }
 
     return NextResponse.json({
@@ -533,4 +458,4 @@ export async function POST(request) {
       { status: 500 }
     );
   }
-        }
+      }
