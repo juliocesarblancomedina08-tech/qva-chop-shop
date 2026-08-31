@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 
 import { eq, and } from "drizzle-orm";
 
-import { db } from "../../../lib/db";
+import { db } from "../../../../lib/db";
 
 import {
   orders,
   giftCardCodes,
-} from "../../../db/schema";
+} from "../../../../db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -1129,4 +1129,4 @@ export async function POST(
       }
     );
   }
-        }
+}
