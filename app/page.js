@@ -3,8 +3,24 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <main className="shop-container">
-      <header className="header">
+    <main
+      className="shop-container"
+      style={{
+        backgroundImage: "url('/fondo pagina.jpg')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        minHeight: "100vh",
+      }}
+    >
+      <header
+        className="header"
+        style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
+          borderRadius: "12px",
+          padding: "20px",
+        }}
+      >
         <div className="logo">🎮 Qva🇨🇺CHOP 🛒</div>
 
         <p className="subtitle">
@@ -13,18 +29,16 @@ export default function Home() {
       </header>
 
       <section className="products-section">
-        <Link
-          href="/offers"
-          className="product-link"
-        >
-          <article className="store-product">
-
+        /offers
+          <article
+            className="store-product"
+            style={{
+              backgroundColor: "rgba(0,0,0,0.75)",
+              backdropFilter: "blur(5px)",
+            }}
+          >
             <div className="product-image">
-              <Image
-                src="/Images.jpeg"
-                alt="Diamonds Singapur"
-                fill
-                sizes="(max-width: 600px) 100vw, 500px"
+              /Images.jpeg 100vw, 500px"
               />
             </div>
 
@@ -37,14 +51,20 @@ export default function Home() {
                 Diamonds Singapur
               </p>
             </div>
-
           </article>
         </Link>
       </section>
 
-      <footer className="footer">
+      <footer
+        className="footer"
+        style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
+          borderRadius: "12px",
+          padding: "10px",
+        }}
+      >
         ⚡ Entrega rápida · 🛡️ Compra segura
       </footer>
     </main>
   );
-}
+          }
