@@ -1,116 +1,184 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
+
 import { db } from "../../../lib/db";
+
 import {
   orders,
-  orderItems,
   giftCardCodes,
 } from "../../../db/schema";
 
-const USDT_DECIMALS = 18;
+export const runtime = "nodejs";
 
-const TRANSFER_TOPIC =
-  "0xddf252ad1be2c89b69c2b068fc378daa" +
-  "952ba7f163c4a11628f55a4df523b3ef";
+const USDT_DECIMALS = 6;
 
-function addressTopic(address) {
-  return (
-    "0x000000000000000000000000" +
-    address
-      .toLowerCase()
-      .replace("0x", "")
-  );
+function normalizeAddress(address) {
+  return String(address || "")
+    .trim()
+    .toLowerCase();
 }
 
-function toUnits(value) {
-  const [whole, fraction = ""] =
-    String(value).split(".");
-
-  const padded = (
-    fraction +
-    "0".repeat(USDT_DECIMALS)
-  ).slice(0, USDT_DECIMALS);
-
-  return (
-    BigInt(whole || "0") *
-      10n ** 18n +
-    BigInt(padded || "0")
-  );
+function normalizeHash(hash) {
+  return String(hash || "")
+    .trim()
+    .toLowerCase();
 }
 
-function fromHex(value) {
-  return parseInt(value, 16);
+function isValidTxHash(hash) {
+  return /^0x[a-fA-F0-9]{64}$/.test(hash);
 }
 
-async function rpc(rpcUrl, method, params) {
-  const response = await fetch(
-    rpcUrl,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type":
-          "application/json",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method,
-        params,
-        id: Date.now(),
-      }),
-      cache: "no-store",
-    }
-  );
+function isValidBscAddress(address) {
+  return /^0x[a-fA-F0-9]{40}$/.test(address);
+}
 
-  if (!response.ok) {
-    throw new Error(
-      `RPC HTTP ${response.status}`
-    );
+function decimalToUnits(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return null;
   }
 
-  const data =
-    await response.json();
-
-  if (data.error) {
-    throw new Error(
-      data.error.message ||
-        "RPC error"
-    );
-  }
-
-  return data.result;
+  return BigInt(
+    Math.round(
+      number * 10 ** USDT_DECIMALS
+    )
+  );
 }
 
 export async function POST(request) {
   try {
-    const body =
-      await request.json();
+    /*
+     * ------------------------------------------------
+     * 1. LEER DATOS DEL CLIENTE
+     * ------------------------------------------------
+     */
 
-    const reference =
-      String(
-        body?.orderReference || ""
-      ).trim();
+    const body = await request.json();
 
-    if (!reference) {
+    const orderId = Number(
+      body?.orderId
+    );
+
+    const txHash = normalizeHash(
+      body?.txHash
+    );
+
+    if (
+      !Number.isInteger(orderId) ||
+      orderId <= 0
+    ) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            "Falta la referencia del pedido.",
+            "ID de pedido inválido.",
         },
         { status: 400 }
       );
     }
 
-    const [order] = await db
+    if (!isValidTxHash(txHash)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "El TX Hash no tiene un formato válido.",
+        },
+        { status: 400 }
+      );
+    }
+
+    /*
+     * ------------------------------------------------
+     * 2. COMPROBAR CONFIGURACIÓN
+     * ------------------------------------------------
+     */
+
+    const apiKey =
+      process.env.BSCSCAN_API_KEY;
+
+    const storeWallet =
+      normalizeAddress(
+        process.env.STORE_WALLET_ADDRESS
+      );
+
+    const usdtContract =
+      normalizeAddress(
+        process.env.USDT_BEP20_CONTRACT
+      );
+
+    if (!apiKey) {
+      console.error(
+        "VERIFY_PAYMENT_ERROR: falta BSCSCAN_API_KEY"
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "El sistema de verificación no está configurado.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !isValidBscAddress(
+        storeWallet
+      )
+    ) {
+      console.error(
+        "VERIFY_PAYMENT_ERROR: STORE_WALLET_ADDRESS inválida"
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "La billetera de recepción no está configurada correctamente.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !isValidBscAddress(
+        usdtContract
+      )
+    ) {
+      console.error(
+        "VERIFY_PAYMENT_ERROR: USDT_BEP20_CONTRACT inválido"
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "El contrato USDT BEP-20 no está configurado correctamente.",
+        },
+        { status: 500 }
+      );
+    }
+
+    /*
+     * ------------------------------------------------
+     * 3. BUSCAR PEDIDO
+     * ------------------------------------------------
+     */
+
+    const orderResult = await db
       .select()
       .from(orders)
       .where(
         eq(
-          orders.reference,
-          reference
+          orders.id,
+          orderId
         )
       )
       .limit(1);
+
+    const order = orderResult[0];
 
     if (!order) {
       return NextResponse.json(
@@ -124,308 +192,442 @@ export async function POST(request) {
     }
 
     /*
-     * Si ya fue entregado,
-     * devolvemos el resultado.
+     * ------------------------------------------------
+     * 4. SI YA ESTÁ PAGADO
+     * ------------------------------------------------
      */
-    if (
-      order.status ===
-      "delivered"
-    ) {
-      const codes =
-        await db
-          .select({
-            productId:
-              giftCardCodes.productId,
-            code:
-              giftCardCodes.code,
-          })
-          .from(giftCardCodes)
-          .where(
-            and(
-              eq(
-                giftCardCodes.orderId,
-                order.id
-              ),
-              eq(
-                giftCardCodes.status,
-                "delivered"
-              )
-            )
-          );
 
+    if (
+      order.status === "paid" ||
+      order.status === "delivered"
+    ) {
       return NextResponse.json({
         ok: true,
-        paid: true,
-        delivered: true,
-        codes,
+        message:
+          "Este pedido ya fue pagado.",
+        order: {
+          id: order.id,
+          reference:
+            order.reference,
+          status:
+            order.status,
+        },
       });
     }
 
     /*
-     * Expiración.
+     * ------------------------------------------------
+     * 5. COMPROBAR EXPIRACIÓN
+     * ------------------------------------------------
      */
+
     if (
       order.expiresAt &&
-      Date.now() >=
-        new Date(
-          order.expiresAt
-        ).getTime()
-    ) {
-
-      await db
-        .update(giftCardCodes)
-        .set({
-          status: "available",
-          orderId: null,
-          reservedAt: null,
-        })
-        .where(
-          and(
-            eq(
-              giftCardCodes.orderId,
-              order.id
-            ),
-            eq(
-              giftCardCodes.status,
-              "reserved"
-            )
-          )
-        );
-
-      await db
-        .update(orders)
-        .set({
-          status: "expired",
-        })
-        .where(
-          eq(
-            orders.id,
-            order.id
-          )
-        );
-
-      return NextResponse.json({
-        ok: true,
-        paid: false,
-        delivered: false,
-        expired: true,
-        message:
-          "El pedido ha expirado.",
-      });
-    }
-
-    const rpcUrl =
-      process.env.BSC_RPC_URL ||
-      "https://bsc-dataseed.binance.org";
-
-    const wallet =
-      process.env.STORE_WALLET_ADDRESS ||
-      process.env
-        .NEXT_PUBLIC_STORE_WALLET_ADDRESS;
-
-    const usdt =
-      process.env.USDT_BEP20_CONTRACT;
-
-    if (!wallet || !usdt) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Falta configurar la billetera o el contrato USDT.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (
-      !order.paymentAmountUsdt
+      new Date(order.expiresAt).getTime() <
+        Date.now()
     ) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            "El pedido no tiene un importe de pago configurado.",
+            "Este pedido ha expirado. Crea un nuevo pedido.",
         },
-        { status: 500 }
+        { status: 400 }
       );
     }
 
     /*
-     * Obtenemos el bloque actual.
+     * ------------------------------------------------
+     * 6. COMPROBAR QUE EL TX NO SE USÓ ANTES
+     * ------------------------------------------------
      */
-    const latestHex =
-      await rpc(
-        rpcUrl,
-        "eth_blockNumber",
-        []
-      );
 
-    const latestBlock =
-      fromHex(latestHex);
+    const existingTx = await db
+      .select()
+      .from(orders)
+      .where(
+        eq(
+          orders.txHash,
+          txHash
+        )
+      )
+      .limit(1);
 
-    /*
-     * Buscamos los últimos ~30 minutos
-     * aproximadamente.
-     */
-    const fromBlock =
-      Math.max(
-        0,
-        latestBlock - 700
-      );
+    if (existingTx.length > 0) {
+      const previousOrder =
+        existingTx[0];
 
-    /*
-     * Buscamos transferencias USDT
-     * hacia nuestra billetera.
-     */
-    const logs =
-      await rpc(
-        rpcUrl,
-        "eth_getLogs",
-        [
+      if (
+        previousOrder.id !==
+        order.id
+      ) {
+        return NextResponse.json(
           {
-            fromBlock:
-              `0x${fromBlock.toString(
-                16
-              )}`,
-
-            toBlock: "latest",
-
-            address:
-              usdt.toLowerCase(),
-
-            topics: [
-              TRANSFER_TOPIC,
-              null,
-              addressTopic(wallet),
-            ],
+            ok: false,
+            error:
+              "Esta transacción ya fue utilizada en otro pedido.",
           },
-        ]
-      );
-
-    const required =
-      toUnits(
-        order.paymentAmountUsdt
-      );
-
-    let matchingLog = null;
-
-    for (const log of logs) {
-      try {
-        const txHash =
-          String(
-            log.transactionHash ||
-              ""
-          );
-
-        if (!txHash) {
-          continue;
-        }
-
-        /*
-         * No permitimos reutilizar
-         * una transacción.
-         */
-        const [used] =
-          await db
-            .select({
-              id: orders.id,
-            })
-            .from(orders)
-            .where(
-              eq(
-                orders.txHash,
-                txHash
-              )
-            )
-            .limit(1);
-
-        if (used) {
-          continue;
-        }
-
-        const value =
-          BigInt(
-            log.data || "0x0"
-          );
-
-        /*
-         * Exigimos el importe exacto.
-         */
-        if (
-          value !== required
-        ) {
-          continue;
-        }
-
-        /*
-         * Esperamos algunas confirmaciones.
-         */
-        const txBlock =
-          fromHex(
-            log.blockNumber
-          );
-
-        const confirmations =
-          latestBlock -
-          txBlock +
-          1;
-
-        if (
-          confirmations < 3
-        ) {
-          continue;
-        }
-
-        matchingLog = log;
-        break;
-
-      } catch (error) {
-        console.error(
-          "LOG_PROCESS_ERROR:",
-          error
+          { status: 400 }
         );
       }
     }
 
     /*
-     * Todavía no llegó.
+     * ------------------------------------------------
+     * 7. CONSULTAR LA BLOCKCHAIN
+     * ------------------------------------------------
      */
-    if (!matchingLog) {
+
+    const apiUrl =
+      "https://api.bscscan.com/api" +
+      "?module=account" +
+      "&action=tokentx" +
+      "&contractaddress=" +
+      encodeURIComponent(
+        usdtContract
+      ) +
+      "&address=" +
+      encodeURIComponent(
+        storeWallet
+      ) +
+      "&page=1" +
+      "&offset=100" +
+      "&sort=desc" +
+      "&apikey=" +
+      encodeURIComponent(
+        apiKey
+      );
+
+    const blockchainResponse =
+      await fetch(apiUrl, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+    if (
+      !blockchainResponse.ok
+    ) {
+      console.error(
+        "BSCSCAN HTTP ERROR:",
+        blockchainResponse.status
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "No se pudo consultar la blockchain. Inténtalo nuevamente.",
+        },
+        { status: 502 }
+      );
+    }
+
+    const blockchainData =
+      await blockchainResponse.json();
+
+    /*
+     * ------------------------------------------------
+     * 8. COMPROBAR RESPUESTA DE BSCSCAN
+     * ------------------------------------------------
+     */
+
+    if (
+      !blockchainData ||
+      !Array.isArray(
+        blockchainData.result
+      )
+    ) {
+      console.error(
+        "BSCSCAN INVALID RESPONSE:",
+        blockchainData
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "La respuesta de la blockchain no es válida.",
+        },
+        { status: 502 }
+      );
+    }
+
+    /*
+     * ------------------------------------------------
+     * 9. BUSCAR LA TRANSACCIÓN
+     * ------------------------------------------------
+     */
+
+    const transaction =
+      blockchainData.result.find(
+        (tx) =>
+          normalizeHash(
+            tx.hash
+          ) === txHash
+      );
+
+    if (!transaction) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "No encontramos esa transacción en la red BNB Smart Chain.",
+        },
+        { status: 400 }
+      );
+    }
+
+    /*
+     * ------------------------------------------------
+     * 10. COMPROBAR CONTRATO USDT
+     * ------------------------------------------------
+     */
+
+    const transactionContract =
+      normalizeAddress(
+        transaction.contractAddress
+      );
+
+    if (
+      transactionContract !==
+      usdtContract
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "La transacción no corresponde al contrato USDT configurado.",
+        },
+        { status: 400 }
+      );
+    }
+
+    /*
+     * ------------------------------------------------
+     * 11. COMPROBAR DESTINO
+     * ------------------------------------------------
+     */
+
+    const transactionTo =
+      normalizeAddress(
+        transaction.to
+      );
+
+    if (
+      transactionTo !==
+      storeWallet
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "El pago no fue enviado a la billetera de la tienda.",
+        },
+        { status: 400 }
+      );
+    }
+
+    /*
+     * ------------------------------------------------
+     * 12. COMPROBAR QUE LA TRANSACCIÓN TERMINÓ BIEN
+     * ------------------------------------------------
+     */
+
+    if (
+      String(
+        transaction.isError
+      ) !== "0"
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "La transacción fue rechazada o falló.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      String(
+        transaction.txreceipt_status
+      ) !== "1"
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "La transacción todavía no tiene una confirmación válida.",
+        },
+        { status: 400 }
+      );
+    }
+
+    /*
+     * ------------------------------------------------
+     * 13. COMPROBAR CONFIRMACIONES
+     * ------------------------------------------------
+     */
+
+    const confirmations =
+      Number(
+        transaction.confirmations ||
+          0
+      );
+
+    if (
+      !Number.isFinite(
+        confirmations
+      ) ||
+      confirmations < 3
+    ) {
       return NextResponse.json({
-        ok: true,
-        paid: false,
-        delivered: false,
-        expired: false,
+        ok: false,
+        pending: true,
         message:
-          "Esperando el pago...",
+          "El pago fue encontrado, pero todavía estamos esperando confirmaciones de la red.",
+        confirmations,
+        requiredConfirmations: 3,
       });
     }
 
-    const txHash =
-      matchingLog.transactionHash;
-
     /*
-     * Marcamos como pagado.
+     * ------------------------------------------------
+     * 14. COMPROBAR IMPORTE
+     * ------------------------------------------------
      */
-    await db
-      .update(orders)
-      .set({
-        status: "paid",
-        txHash,
-        paidAt: new Date(),
-      })
-      .where(
-        eq(
-          orders.id,
-          order.id
+
+    const blockchainAmount =
+      BigInt(
+        String(
+          transaction.value ||
+            "0"
         )
       );
 
+    const requiredAmount =
+      decimalToUnits(
+        order.paymentAmountUsdt
+      );
+
+    if (
+      requiredAmount === null
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "El importe del pedido no es válido.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (
+      blockchainAmount <
+      requiredAmount
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            `El pago recibido es insuficiente. Debes enviar ${order.paymentAmountUsdt} USDT.`,
+        },
+        { status: 400 }
+      );
+    }
+
     /*
-     * Recuperamos los códigos
-     * reservados para este pedido.
+     * ------------------------------------------------
+     * 15. MARCAR PEDIDO COMO PAGADO
+     * ------------------------------------------------
      */
-    const reserved =
+
+    const paidAt =
+      new Date();
+
+    const updatedOrders =
+      await db
+        .update(orders)
+        .set({
+          status: "paid",
+          txHash,
+          paidAt,
+        })
+        .where(
+          and(
+            eq(
+              orders.id,
+              order.id
+            ),
+            eq(
+              orders.status,
+              "pending"
+            )
+          )
+        )
+        .returning();
+
+    /*
+     * Si otro proceso lo pagó
+     * primero, no volvemos a
+     * procesarlo.
+     */
+
+    if (
+      updatedOrders.length === 0
+    ) {
+      const currentOrderResult =
+        await db
+          .select()
+          .from(orders)
+          .where(
+            eq(
+              orders.id,
+              order.id
+            )
+          )
+          .limit(1);
+
+      const currentOrder =
+        currentOrderResult[0];
+
+      if (
+        currentOrder?.status ===
+        "paid"
+      ) {
+        return NextResponse.json({
+          ok: true,
+          message:
+            "El pedido ya fue confirmado.",
+          order: {
+            id:
+              currentOrder.id,
+            reference:
+              currentOrder.reference,
+            status:
+              currentOrder.status,
+          },
+        });
+      }
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "No se pudo actualizar el pedido.",
+        },
+        { status: 409 }
+      );
+    }
+
+    /*
+     * ------------------------------------------------
+     * 16. OBTENER LOS CÓDIGOS RESERVADOS
+     * ------------------------------------------------
+     */
+
+    const reservedCodes =
       await db
         .select()
         .from(giftCardCodes)
@@ -442,64 +644,22 @@ export async function POST(request) {
           )
         );
 
-    const items =
-      await db
-        .select()
-        .from(orderItems)
-        .where(
-          eq(
-            orderItems.orderId,
-            order.id
-          )
-        );
+    /*
+     * ------------------------------------------------
+     * 17. ENTREGAR LOS CÓDIGOS
+     * ------------------------------------------------
+     */
 
-    const requiredCodes =
-      items.reduce(
-        (sum, item) =>
-          sum +
-          Number(
-            item.quantity
-          ),
-        0
-      );
-
-    if (
-      reserved.length <
-      requiredCodes
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          paid: true,
-          delivered: false,
-          error:
-            "El pago llegó, pero no hay suficientes códigos reservados para completar el pedido.",
-        },
-        { status: 500 }
-      );
-    }
-
-    const delivered = [];
+    const deliveredCodes = [];
 
     for (
-      const code of reserved
+      const code of reservedCodes
     ) {
-
-      if (
-        delivered.length >=
-        requiredCodes
-      ) {
-        break;
-      }
-
-      const [updated] =
+      const updatedCodes =
         await db
-          .update(
-            giftCardCodes
-          )
+          .update(giftCardCodes)
           .set({
-            status:
-              "delivered",
+            status: "delivered",
             deliveredAt:
               new Date(),
           })
@@ -521,53 +681,91 @@ export async function POST(request) {
           )
           .returning();
 
-      if (updated) {
-        delivered.push({
-          productId:
-            updated.productId,
-          code:
-            updated.code,
-        });
+      if (
+        updatedCodes.length > 0
+      ) {
+        deliveredCodes.push(
+          updatedCodes[0]
+        );
       }
     }
 
-    const isDelivered =
-      delivered.length ===
-      requiredCodes;
+    /*
+     * ------------------------------------------------
+     * 18. MARCAR PEDIDO COMO ENTREGADO
+     * ------------------------------------------------
+     */
 
-    if (isDelivered) {
-      await db
-        .update(orders)
-        .set({
-          status:
-            "delivered",
-          deliveredAt:
-            new Date(),
-        })
-        .where(
-          eq(
-            orders.id,
-            order.id
-          )
-        );
-    }
+    const deliveredAt =
+      new Date();
+
+    const finalStatus =
+      deliveredCodes.length > 0
+        ? "delivered"
+        : "paid";
+
+    await db
+      .update(orders)
+      .set({
+        status:
+          finalStatus,
+        deliveredAt:
+          finalStatus ===
+          "delivered"
+            ? deliveredAt
+            : null,
+      })
+      .where(
+        eq(
+          orders.id,
+          order.id
+        )
+      );
+
+    /*
+     * ------------------------------------------------
+     * 19. DEVOLVER CÓDIGOS AL CLIENTE
+     * ------------------------------------------------
+     */
 
     return NextResponse.json({
       ok: true,
-      paid: true,
-      delivered:
-        isDelivered,
-      expired: false,
-      txHash,
-      codes: delivered,
+
       message:
-        isDelivered
+        finalStatus ===
+        "delivered"
           ? "Pago confirmado y pedido entregado."
-          : "Pago confirmado.",
+          : "Pago confirmado. El pedido está siendo procesado.",
+
+      order: {
+        id: order.id,
+        reference:
+          order.reference,
+        status:
+          finalStatus,
+      },
+
+      codes:
+        deliveredCodes.map(
+          (code) => ({
+            id: code.id,
+            code: code.code,
+            productId:
+              code.productId,
+          })
+        ),
+
+      transaction: {
+        hash: txHash,
+        confirmations,
+        amountUsdt:
+          Number(
+            transaction.value
+          ) /
+          10 ** USDT_DECIMALS,
+      },
     });
-
   } catch (error) {
-
     console.error(
       "VERIFY_PAYMENT_ERROR:",
       error
@@ -577,13 +775,9 @@ export async function POST(request) {
       {
         ok: false,
         error:
-          "Error interno al verificar el pago.",
-        debug:
-          error instanceof Error
-            ? error.message
-            : String(error),
+          "Ocurrió un error al verificar el pago.",
       },
       { status: 500 }
     );
   }
-        }
+            }
