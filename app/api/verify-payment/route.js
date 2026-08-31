@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+
 import { eq, and } from "drizzle-orm";
 
 import { db } from "../../../lib/db";
@@ -8,61 +9,169 @@ import {
   giftCardCodes,
 } from "../../../db/schema";
 
-export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-const USDT_DECIMALS = 6;
+const USDT_DECIMALS = 18;
 
-function normalizeAddress(address) {
-  return String(address || "")
-    .trim()
-    .toLowerCase();
-}
+/*
+ * Evento ERC-20:
+ *
+ * Transfer(address,address,uint256)
+ */
+const TRANSFER_TOPIC =
+  "0xddf252ad1be2c89b69c2b068fc378daa" +
+  "952ba7f163c4a11628f55a4df523b3ef";
 
-function normalizeHash(hash) {
-  return String(hash || "")
-    .trim()
-    .toLowerCase();
-}
+/*
+ * Convierte una dirección en topic.
+ */
+function addressToTopic(address) {
+  const clean = String(address || "")
+    .toLowerCase()
+    .replace(/^0x/, "");
 
-function isValidTxHash(hash) {
-  return /^0x[a-fA-F0-9]{64}$/.test(hash);
-}
-
-function isValidBscAddress(address) {
-  return /^0x[a-fA-F0-9]{40}$/.test(address);
-}
-
-function decimalToUnits(value) {
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) {
-    return null;
-  }
-
-  return BigInt(
-    Math.round(
-      number * 10 ** USDT_DECIMALS
-    )
+  return (
+    "0x000000000000000000000000" +
+    clean
   );
 }
 
-export async function POST(request) {
+/*
+ * Convierte número decimal a hexadecimal RPC.
+ */
+function toRpcHex(number) {
+  return (
+    "0x" +
+    Number(number).toString(16)
+  );
+}
+
+/*
+ * Convierte una cantidad USDT a unidades
+ * de 18 decimales usando BigInt.
+ */
+function usdtToUnits(value) {
+  const text = String(
+    value ?? "0"
+  ).trim();
+
+  if (!text || text.startsWith("-")) {
+    return 0n;
+  }
+
+  const parts = text.split(".");
+
+  const whole =
+    parts[0] || "0";
+
+  const fraction =
+    parts[1] || "";
+
+  const padded = (
+    fraction +
+    "0".repeat(USDT_DECIMALS)
+  ).slice(0, USDT_DECIMALS);
+
+  return (
+    BigInt(whole) *
+      10n ** BigInt(USDT_DECIMALS) +
+    BigInt(padded || "0")
+  );
+}
+
+/*
+ * Realiza una petición JSON-RPC.
+ */
+async function rpcRequest(
+  rpcUrl,
+  method,
+  params
+) {
+  const response = await fetch(
+    rpcUrl,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/json",
+      },
+
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: Date.now(),
+        method,
+        params,
+      }),
+
+      cache: "no-store",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `RPC HTTP ${response.status}`
+    );
+  }
+
+  const data =
+    await response.json();
+
+  if (data.error) {
+    throw new Error(
+      data.error.message ||
+        "RPC error"
+    );
+  }
+
+  return data.result;
+}
+
+/*
+ * Obtiene los códigos entregados.
+ */
+async function getDeliveredCodes(
+  orderId
+) {
+  return await db
+    .select({
+      productId:
+        giftCardCodes.productId,
+
+      code:
+        giftCardCodes.code,
+    })
+    .from(giftCardCodes)
+    .where(
+      and(
+        eq(
+          giftCardCodes.orderId,
+          orderId
+        ),
+
+        eq(
+          giftCardCodes.status,
+          "delivered"
+        )
+      )
+    );
+}
+
+export async function POST(
+  request
+) {
   try {
     /*
-     * ------------------------------------------------
-     * 1. LEER DATOS DEL CLIENTE
-     * ------------------------------------------------
+     * ============================
+     * 1. LEER PEDIDO
+     * ============================
      */
 
-    const body = await request.json();
+    const body =
+      await request.json();
 
-    const orderId = Number(
-      body?.orderId
-    );
-
-    const txHash = normalizeHash(
-      body?.txHash
-    );
+    const orderId =
+      Number(body?.orderId);
 
     if (
       !Number.isInteger(orderId) ||
@@ -74,111 +183,29 @@ export async function POST(request) {
           error:
             "ID de pedido inválido.",
         },
-        { status: 400 }
-      );
-    }
-
-    if (!isValidTxHash(txHash)) {
-      return NextResponse.json(
         {
-          ok: false,
-          error:
-            "El TX Hash no tiene un formato válido.",
-        },
-        { status: 400 }
+          status: 400,
+        }
       );
     }
 
     /*
-     * ------------------------------------------------
-     * 2. COMPROBAR CONFIGURACIÓN
-     * ------------------------------------------------
+     * ============================
+     * 2. BUSCAR PEDIDO
+     * ============================
      */
 
-    const apiKey =
-      process.env.BSCSCAN_API_KEY;
-
-    const storeWallet =
-      normalizeAddress(
-        process.env.STORE_WALLET_ADDRESS
-      );
-
-    const usdtContract =
-      normalizeAddress(
-        process.env.USDT_BEP20_CONTRACT
-      );
-
-    if (!apiKey) {
-      console.error(
-        "VERIFY_PAYMENT_ERROR: falta BSCSCAN_API_KEY"
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "El sistema de verificación no está configurado.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (
-      !isValidBscAddress(
-        storeWallet
-      )
-    ) {
-      console.error(
-        "VERIFY_PAYMENT_ERROR: STORE_WALLET_ADDRESS inválida"
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "La billetera de recepción no está configurada correctamente.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (
-      !isValidBscAddress(
-        usdtContract
-      )
-    ) {
-      console.error(
-        "VERIFY_PAYMENT_ERROR: USDT_BEP20_CONTRACT inválido"
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "El contrato USDT BEP-20 no está configurado correctamente.",
-        },
-        { status: 500 }
-      );
-    }
-
-    /*
-     * ------------------------------------------------
-     * 3. BUSCAR PEDIDO
-     * ------------------------------------------------
-     */
-
-    const orderResult = await db
-      .select()
-      .from(orders)
-      .where(
-        eq(
-          orders.id,
-          orderId
+    const [order] =
+      await db
+        .select()
+        .from(orders)
+        .where(
+          eq(
+            orders.id,
+            orderId
+          )
         )
-      )
-      .limit(1);
-
-    const order = orderResult[0];
+        .limit(1);
 
     if (!order) {
       return NextResponse.json(
@@ -187,456 +214,112 @@ export async function POST(request) {
           error:
             "Pedido no encontrado.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
     /*
-     * ------------------------------------------------
-     * 4. SI YA ESTÁ PAGADO
-     * ------------------------------------------------
+     * ============================
+     * 3. SI YA FUE ENTREGADO
+     * ============================
      */
 
     if (
-      order.status === "paid" ||
-      order.status === "delivered"
+      order.status ===
+      "delivered"
     ) {
+      const codes =
+        await getDeliveredCodes(
+          order.id
+        );
+
       return NextResponse.json({
         ok: true,
-        message:
-          "Este pedido ya fue pagado.",
+
+        paid: true,
+
+        delivered: true,
+
+        expired: false,
+
         order: {
           id: order.id,
           reference:
             order.reference,
-          status:
-            order.status,
+          status: "delivered",
         },
+
+        codes,
       });
     }
 
     /*
-     * ------------------------------------------------
+     * ============================
+     * 4. PEDIDO EXPIRADO
+     * ============================
+     */
+
+    if (
+      order.status ===
+      "expired"
+    ) {
+      return NextResponse.json({
+        ok: true,
+
+        paid: false,
+
+        delivered: false,
+
+        expired: true,
+
+        order: {
+          id: order.id,
+          reference:
+            order.reference,
+          status: "expired",
+        },
+
+        message:
+          "Este pedido ha vencido.",
+      });
+    }
+
+    /*
+     * ============================
      * 5. COMPROBAR EXPIRACIÓN
-     * ------------------------------------------------
+     * ============================
      */
 
     if (
       order.expiresAt &&
-      new Date(order.expiresAt).getTime() <
-        Date.now()
+      Date.now() >=
+        new Date(
+          order.expiresAt
+        ).getTime()
     ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Este pedido ha expirado. Crea un nuevo pedido.",
-        },
-        { status: 400 }
-      );
-    }
+      /*
+       * Liberamos códigos reservados.
+       */
 
-    /*
-     * ------------------------------------------------
-     * 6. COMPROBAR QUE EL TX NO SE USÓ ANTES
-     * ------------------------------------------------
-     */
-
-    const existingTx = await db
-      .select()
-      .from(orders)
-      .where(
-        eq(
-          orders.txHash,
-          txHash
-        )
-      )
-      .limit(1);
-
-    if (existingTx.length > 0) {
-      const previousOrder =
-        existingTx[0];
-
-      if (
-        previousOrder.id !==
-        order.id
-      ) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "Esta transacción ya fue utilizada en otro pedido.",
-          },
-          { status: 400 }
-        );
-      }
-    }
-
-    /*
-     * ------------------------------------------------
-     * 7. CONSULTAR LA BLOCKCHAIN
-     * ------------------------------------------------
-     */
-
-    const apiUrl =
-      "https://api.bscscan.com/api" +
-      "?module=account" +
-      "&action=tokentx" +
-      "&contractaddress=" +
-      encodeURIComponent(
-        usdtContract
-      ) +
-      "&address=" +
-      encodeURIComponent(
-        storeWallet
-      ) +
-      "&page=1" +
-      "&offset=100" +
-      "&sort=desc" +
-      "&apikey=" +
-      encodeURIComponent(
-        apiKey
-      );
-
-    const blockchainResponse =
-      await fetch(apiUrl, {
-        method: "GET",
-        cache: "no-store",
-      });
-
-    if (
-      !blockchainResponse.ok
-    ) {
-      console.error(
-        "BSCSCAN HTTP ERROR:",
-        blockchainResponse.status
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "No se pudo consultar la blockchain. Inténtalo nuevamente.",
-        },
-        { status: 502 }
-      );
-    }
-
-    const blockchainData =
-      await blockchainResponse.json();
-
-    /*
-     * ------------------------------------------------
-     * 8. COMPROBAR RESPUESTA DE BSCSCAN
-     * ------------------------------------------------
-     */
-
-    if (
-      !blockchainData ||
-      !Array.isArray(
-        blockchainData.result
-      )
-    ) {
-      console.error(
-        "BSCSCAN INVALID RESPONSE:",
-        blockchainData
-      );
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "La respuesta de la blockchain no es válida.",
-        },
-        { status: 502 }
-      );
-    }
-
-    /*
-     * ------------------------------------------------
-     * 9. BUSCAR LA TRANSACCIÓN
-     * ------------------------------------------------
-     */
-
-    const transaction =
-      blockchainData.result.find(
-        (tx) =>
-          normalizeHash(
-            tx.hash
-          ) === txHash
-      );
-
-    if (!transaction) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "No encontramos esa transacción en la red BNB Smart Chain.",
-        },
-        { status: 400 }
-      );
-    }
-
-    /*
-     * ------------------------------------------------
-     * 10. COMPROBAR CONTRATO USDT
-     * ------------------------------------------------
-     */
-
-    const transactionContract =
-      normalizeAddress(
-        transaction.contractAddress
-      );
-
-    if (
-      transactionContract !==
-      usdtContract
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "La transacción no corresponde al contrato USDT configurado.",
-        },
-        { status: 400 }
-      );
-    }
-
-    /*
-     * ------------------------------------------------
-     * 11. COMPROBAR DESTINO
-     * ------------------------------------------------
-     */
-
-    const transactionTo =
-      normalizeAddress(
-        transaction.to
-      );
-
-    if (
-      transactionTo !==
-      storeWallet
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "El pago no fue enviado a la billetera de la tienda.",
-        },
-        { status: 400 }
-      );
-    }
-
-    /*
-     * ------------------------------------------------
-     * 12. COMPROBAR QUE LA TRANSACCIÓN TERMINÓ BIEN
-     * ------------------------------------------------
-     */
-
-    if (
-      String(
-        transaction.isError
-      ) !== "0"
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "La transacción fue rechazada o falló.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (
-      String(
-        transaction.txreceipt_status
-      ) !== "1"
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "La transacción todavía no tiene una confirmación válida.",
-        },
-        { status: 400 }
-      );
-    }
-
-    /*
-     * ------------------------------------------------
-     * 13. COMPROBAR CONFIRMACIONES
-     * ------------------------------------------------
-     */
-
-    const confirmations =
-      Number(
-        transaction.confirmations ||
-          0
-      );
-
-    if (
-      !Number.isFinite(
-        confirmations
-      ) ||
-      confirmations < 3
-    ) {
-      return NextResponse.json({
-        ok: false,
-        pending: true,
-        message:
-          "El pago fue encontrado, pero todavía estamos esperando confirmaciones de la red.",
-        confirmations,
-        requiredConfirmations: 3,
-      });
-    }
-
-    /*
-     * ------------------------------------------------
-     * 14. COMPROBAR IMPORTE
-     * ------------------------------------------------
-     */
-
-    const blockchainAmount =
-      BigInt(
-        String(
-          transaction.value ||
-            "0"
-        )
-      );
-
-    const requiredAmount =
-      decimalToUnits(
-        order.paymentAmountUsdt
-      );
-
-    if (
-      requiredAmount === null
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "El importe del pedido no es válido.",
-        },
-        { status: 500 }
-      );
-    }
-
-    if (
-      blockchainAmount <
-      requiredAmount
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            `El pago recibido es insuficiente. Debes enviar ${order.paymentAmountUsdt} USDT.`,
-        },
-        { status: 400 }
-      );
-    }
-
-    /*
-     * ------------------------------------------------
-     * 15. MARCAR PEDIDO COMO PAGADO
-     * ------------------------------------------------
-     */
-
-    const paidAt =
-      new Date();
-
-    const updatedOrders =
       await db
-        .update(orders)
+        .update(giftCardCodes)
         .set({
-          status: "paid",
-          txHash,
-          paidAt,
+          status:
+            "available",
+
+          orderId: null,
+
+          reservedAt: null,
         })
-        .where(
-          and(
-            eq(
-              orders.id,
-              order.id
-            ),
-            eq(
-              orders.status,
-              "pending"
-            )
-          )
-        )
-        .returning();
-
-    /*
-     * Si otro proceso lo pagó
-     * primero, no volvemos a
-     * procesarlo.
-     */
-
-    if (
-      updatedOrders.length === 0
-    ) {
-      const currentOrderResult =
-        await db
-          .select()
-          .from(orders)
-          .where(
-            eq(
-              orders.id,
-              order.id
-            )
-          )
-          .limit(1);
-
-      const currentOrder =
-        currentOrderResult[0];
-
-      if (
-        currentOrder?.status ===
-        "paid"
-      ) {
-        return NextResponse.json({
-          ok: true,
-          message:
-            "El pedido ya fue confirmado.",
-          order: {
-            id:
-              currentOrder.id,
-            reference:
-              currentOrder.reference,
-            status:
-              currentOrder.status,
-          },
-        });
-      }
-
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "No se pudo actualizar el pedido.",
-        },
-        { status: 409 }
-      );
-    }
-
-    /*
-     * ------------------------------------------------
-     * 16. OBTENER LOS CÓDIGOS RESERVADOS
-     * ------------------------------------------------
-     */
-
-    const reservedCodes =
-      await db
-        .select()
-        .from(giftCardCodes)
         .where(
           and(
             eq(
               giftCardCodes.orderId,
               order.id
             ),
+
             eq(
               giftCardCodes.status,
               "reserved"
@@ -644,76 +327,742 @@ export async function POST(request) {
           )
         );
 
+      /*
+       * Marcamos pedido expirado.
+       */
+
+      await db
+        .update(orders)
+        .set({
+          status:
+            "expired",
+        })
+        .where(
+          eq(
+            orders.id,
+            order.id
+          )
+        );
+
+      return NextResponse.json({
+        ok: true,
+
+        paid: false,
+
+        delivered: false,
+
+        expired: true,
+
+        order: {
+          id: order.id,
+          reference:
+            order.reference,
+          status: "expired",
+        },
+
+        message:
+          "El tiempo para realizar el pago ha terminado.",
+      });
+    }
+
     /*
-     * ------------------------------------------------
-     * 17. ENTREGAR LOS CÓDIGOS
-     * ------------------------------------------------
+     * ============================
+     * 6. VARIABLES DE PAGO
+     * ============================
      */
 
-    const deliveredCodes = [];
+    const rpcUrl =
+      process.env.BSC_RPC_URL;
+
+    const wallet =
+      process.env.STORE_WALLET_ADDRESS ||
+      process.env
+        .NEXT_PUBLIC_STORE_WALLET_ADDRESS;
+
+    const usdtContract =
+      process.env.USDT_BEP20_CONTRACT;
+
+    if (
+      !rpcUrl ||
+      !wallet ||
+      !usdtContract
+    ) {
+      console.error(
+        "PAYMENT_CONFIG_ERROR",
+        {
+          rpc:
+            Boolean(rpcUrl),
+
+          wallet:
+            Boolean(wallet),
+
+          contract:
+            Boolean(
+              usdtContract
+            ),
+        }
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+
+          error:
+            "Faltan variables de configuración del pago.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    const destination =
+      wallet.toLowerCase();
+
+    const contract =
+      usdtContract.toLowerCase();
+
+    /*
+     * ============================
+     * 7. CANTIDAD EXACTA DEL PEDIDO
+     * ============================
+     *
+     * IMPORTANTE:
+     *
+     * Usamos paymentAmountUsdt,
+     * NO totalUsdt.
+     *
+     */
+
+    const requiredValue =
+      usdtToUnits(
+        order.paymentAmountUsdt
+      );
+
+    if (
+      requiredValue <= 0n
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+
+          error:
+            "La cantidad de pago del pedido no es válida.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    /*
+     * ============================
+     * 8. BLOQUE ACTUAL
+     * ============================
+     */
+
+    const latestBlockHex =
+      await rpcRequest(
+        rpcUrl,
+        "eth_blockNumber",
+        []
+      );
+
+    const latestBlock =
+      parseInt(
+        latestBlockHex,
+        16
+      );
+
+    /*
+     * Buscamos aproximadamente
+     * los últimos 20 minutos.
+     *
+     * BSC produce bloques muy rápido,
+     * por eso utilizamos una ventana
+     * limitada para evitar errores
+     * de RPC.
+     */
+
+    const BLOCK_WINDOW = 2500;
+
+    const fromBlock =
+      Math.max(
+        0,
+        latestBlock -
+          BLOCK_WINDOW
+      );
+
+    /*
+     * ============================
+     * 9. BUSCAR TRANSFERENCIAS USDT
+     * ============================
+     */
+
+    const logs =
+      await rpcRequest(
+        rpcUrl,
+        "eth_getLogs",
+        [
+          {
+            fromBlock:
+              toRpcHex(
+                fromBlock
+              ),
+
+            toBlock:
+              "latest",
+
+            /*
+             * SOLO este contrato.
+             */
+
+            address:
+              contract,
+
+            /*
+             * Evento Transfer.
+             *
+             * topics[2] =
+             * dirección receptora.
+             */
+
+            topics: [
+              TRANSFER_TOPIC,
+
+              null,
+
+              addressToTopic(
+                destination
+              ),
+            ],
+          },
+        ]
+      );
+
+    if (
+      !Array.isArray(logs)
+    ) {
+      throw new Error(
+        "Respuesta RPC inválida."
+      );
+    }
+
+    /*
+     * ============================
+     * 10. BUSCAR PAGO CORRECTO
+     * ============================
+     */
+
+    let matchingLog =
+      null;
 
     for (
-      const code of reservedCodes
+      const log of logs
     ) {
-      const updatedCodes =
-        await db
-          .update(giftCardCodes)
-          .set({
-            status: "delivered",
-            deliveredAt:
-              new Date(),
+      try {
+        const txHash =
+          String(
+            log.transactionHash ||
+              ""
+          );
+
+        if (!txHash) {
+          continue;
+        }
+
+        /*
+         * Evitamos utilizar
+         * una transacción que
+         * ya haya sido utilizada.
+         */
+
+        const [
+          alreadyUsed,
+        ] = await db
+          .select({
+            id: orders.id,
           })
+          .from(orders)
           .where(
-            and(
-              eq(
-                giftCardCodes.id,
-                code.id
-              ),
-              eq(
-                giftCardCodes.status,
-                "reserved"
-              ),
-              eq(
-                giftCardCodes.orderId,
-                order.id
-              )
+            eq(
+              orders.txHash,
+              txHash
             )
           )
-          .returning();
+          .limit(1);
 
-      if (
-        updatedCodes.length > 0
+        if (alreadyUsed) {
+          continue;
+        }
+
+        /*
+         * Cantidad enviada.
+         */
+
+        const value =
+          BigInt(
+            log.data ||
+              "0x0"
+          );
+
+        /*
+         * El pago debe cubrir
+         * como mínimo la cantidad
+         * exacta solicitada.
+         */
+
+        if (
+          value <
+          requiredValue
+        ) {
+          continue;
+        }
+
+        /*
+         * Encontramos un pago
+         * compatible.
+         */
+
+        matchingLog =
+          log;
+
+        break;
+      } catch (
+        logError
       ) {
-        deliveredCodes.push(
-          updatedCodes[0]
+        console.error(
+          "PAYMENT_LOG_ERROR:",
+          logError
         );
       }
     }
 
     /*
-     * ------------------------------------------------
-     * 18. MARCAR PEDIDO COMO ENTREGADO
-     * ------------------------------------------------
+     * ============================
+     * 11. TODAVÍA NO PAGÓ
+     * ============================
      */
 
-    const deliveredAt =
-      new Date();
+    if (!matchingLog) {
+      return NextResponse.json({
+        ok: true,
 
-    const finalStatus =
-      deliveredCodes.length > 0
-        ? "delivered"
-        : "paid";
+        paid: false,
+
+        delivered: false,
+
+        expired: false,
+
+        order: {
+          id: order.id,
+
+          reference:
+            order.reference,
+
+          status:
+            order.status,
+        },
+
+        message:
+          "Esperando el pago...",
+      });
+    }
+
+    /*
+     * ============================
+     * 12. OBTENER TX HASH
+     * ============================
+     */
+
+    const txHash =
+      String(
+        matchingLog.transactionHash
+      );
+
+    /*
+     * ============================
+     * 13. VERIFICAR RECEIPT
+     * ============================
+     *
+     * Nos aseguramos de que la
+     * transacción realmente terminó
+     * correctamente.
+     */
+
+    const receipt =
+      await rpcRequest(
+        rpcUrl,
+        "eth_getTransactionReceipt",
+        [txHash]
+      );
+
+    if (!receipt) {
+      return NextResponse.json({
+        ok: true,
+
+        paid: false,
+
+        delivered: false,
+
+        expired: false,
+
+        order: {
+          id: order.id,
+
+          reference:
+            order.reference,
+
+          status:
+            order.status,
+        },
+
+        message:
+          "Pago detectado. Esperando confirmación de la red...",
+      });
+    }
+
+    /*
+     * status 0x1 = éxito.
+     */
+
+    if (
+      receipt.status !==
+      "0x1"
+    ) {
+      return NextResponse.json({
+        ok: true,
+
+        paid: false,
+
+        delivered: false,
+
+        expired: false,
+
+        order: {
+          id: order.id,
+
+          reference:
+            order.reference,
+
+          status:
+            order.status,
+        },
+
+        message:
+          "La transacción no fue confirmada correctamente.",
+      });
+    }
+
+    /*
+     * ============================
+     * 14. CONFIRMACIONES
+     * ============================
+     *
+     * Esperamos varias confirmaciones
+     * antes de entregar el código.
+     */
+
+    const transactionBlock =
+      parseInt(
+        receipt.blockNumber,
+        16
+      );
+
+    const confirmations =
+      latestBlock -
+      transactionBlock +
+      1;
+
+    const REQUIRED_CONFIRMATIONS = 3;
+
+    if (
+      confirmations <
+      REQUIRED_CONFIRMATIONS
+    ) {
+      return NextResponse.json({
+        ok: true,
+
+        paid: false,
+
+        delivered: false,
+
+        expired: false,
+
+        order: {
+          id: order.id,
+
+          reference:
+            order.reference,
+
+          status:
+            order.status,
+        },
+
+        confirmations,
+
+        requiredConfirmations:
+          REQUIRED_CONFIRMATIONS,
+
+        message:
+          `Pago detectado. Esperando confirmaciones (${confirmations}/${REQUIRED_CONFIRMATIONS})...`,
+      });
+    }
+
+    /*
+     * ============================
+     * 15. COMPROBAR CÓDIGOS
+     * ============================
+     */
+
+    const reservedCodes =
+      await db
+        .select()
+        .from(
+          giftCardCodes
+        )
+        .where(
+          and(
+            eq(
+              giftCardCodes.orderId,
+              order.id
+            ),
+
+            eq(
+              giftCardCodes.status,
+              "reserved"
+            )
+          )
+        );
+
+    if (
+      reservedCodes.length ===
+      0
+    ) {
+      /*
+       * Puede que otro intento
+       * ya haya entregado los códigos.
+       */
+
+      const deliveredCodes =
+        await getDeliveredCodes(
+          order.id
+        );
+
+      if (
+        deliveredCodes.length >
+        0
+      ) {
+        await db
+          .update(orders)
+          .set({
+            status:
+              "delivered",
+
+            txHash,
+
+            paidAt:
+              order.paidAt ||
+              new Date(),
+
+            deliveredAt:
+              order.deliveredAt ||
+              new Date(),
+          })
+          .where(
+            eq(
+              orders.id,
+              order.id
+            )
+          );
+
+        return NextResponse.json({
+          ok: true,
+
+          paid: true,
+
+          delivered: true,
+
+          expired: false,
+
+          order: {
+            id: order.id,
+
+            reference:
+              order.reference,
+
+            status:
+              "delivered",
+          },
+
+          txHash,
+
+          codes:
+            deliveredCodes,
+        });
+      }
+
+      return NextResponse.json(
+        {
+          ok: false,
+
+          error:
+            "El pedido no tiene códigos reservados disponibles.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    /*
+     * ============================
+     * 16. MARCAR PAGO
+     * ============================
+     */
+
+    await db
+      .update(orders)
+      .set({
+        status: "paid",
+
+        txHash,
+
+        paidAt:
+          new Date(),
+      })
+      .where(
+        and(
+          eq(
+            orders.id,
+            order.id
+          ),
+
+          eq(
+            orders.status,
+            "pending"
+          )
+        )
+      );
+
+    /*
+     * ============================
+     * 17. ENTREGAR CÓDIGOS
+     * ============================
+     */
+
+    const deliveredCodes =
+      [];
+
+    for (
+      const reservedCode of
+        reservedCodes
+    ) {
+      const [
+        updatedCode,
+      ] = await db
+        .update(
+          giftCardCodes
+        )
+        .set({
+          status:
+            "delivered",
+
+          deliveredAt:
+            new Date(),
+        })
+        .where(
+          and(
+            eq(
+              giftCardCodes.id,
+              reservedCode.id
+            ),
+
+            eq(
+              giftCardCodes.orderId,
+              order.id
+            ),
+
+            eq(
+              giftCardCodes.status,
+              "reserved"
+            )
+          )
+        )
+        .returning();
+
+      if (updatedCode) {
+        deliveredCodes.push({
+          productId:
+            updatedCode.productId,
+
+          code:
+            updatedCode.code,
+        });
+      }
+    }
+
+    /*
+     * ============================
+     * 18. COMPROBAR ENTREGA
+     * ============================
+     */
+
+    if (
+      deliveredCodes.length !==
+      reservedCodes.length
+    ) {
+      console.error(
+        "PARTIAL_DELIVERY",
+        {
+          orderId:
+            order.id,
+
+          reserved:
+            reservedCodes.length,
+
+          delivered:
+            deliveredCodes.length,
+        }
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+
+          paid: true,
+
+          delivered: false,
+
+          error:
+            "El pago fue confirmado, pero no se pudieron entregar todos los códigos.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    /*
+     * ============================
+     * 19. MARCAR PEDIDO ENTREGADO
+     * ============================
+     */
 
     await db
       .update(orders)
       .set({
         status:
-          finalStatus,
+          "delivered",
+
+        txHash,
+
+        paidAt:
+          order.paidAt ||
+          new Date(),
+
         deliveredAt:
-          finalStatus ===
-          "delivered"
-            ? deliveredAt
-            : null,
+          new Date(),
       })
       .where(
         eq(
@@ -723,47 +1072,39 @@ export async function POST(request) {
       );
 
     /*
-     * ------------------------------------------------
-     * 19. DEVOLVER CÓDIGOS AL CLIENTE
-     * ------------------------------------------------
+     * ============================
+     * 20. RESPUESTA FINAL
+     * ============================
      */
 
     return NextResponse.json({
       ok: true,
 
-      message:
-        finalStatus ===
-        "delivered"
-          ? "Pago confirmado y pedido entregado."
-          : "Pago confirmado. El pedido está siendo procesado.",
+      paid: true,
+
+      delivered: true,
+
+      expired: false,
 
       order: {
         id: order.id,
+
         reference:
           order.reference,
+
         status:
-          finalStatus,
+          "delivered",
       },
+
+      txHash,
+
+      confirmations,
 
       codes:
-        deliveredCodes.map(
-          (code) => ({
-            id: code.id,
-            code: code.code,
-            productId:
-              code.productId,
-          })
-        ),
+        deliveredCodes,
 
-      transaction: {
-        hash: txHash,
-        confirmations,
-        amountUsdt:
-          Number(
-            transaction.value
-          ) /
-          10 ** USDT_DECIMALS,
-      },
+      message:
+        "Pago confirmado y pedido entregado.",
     });
   } catch (error) {
     console.error(
@@ -774,10 +1115,18 @@ export async function POST(request) {
     return NextResponse.json(
       {
         ok: false,
+
         error:
-          "Ocurrió un error al verificar el pago.",
+          "Error interno al verificar el pago.",
+
+        debug:
+          error instanceof Error
+            ? error.message
+            : String(error),
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
-            }
+        }
