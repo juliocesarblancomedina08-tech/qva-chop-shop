@@ -1,34 +1,29 @@
 import { NextResponse } from "next/server";
-
 import { eq, and } from "drizzle-orm";
 
-import { db } from "../../../../lib/db";
+import { db } from "../../../lib/db";
 
 import {
   orders,
   giftCardCodes,
-} from "../../../../db/schema";
+} from "../../../db/schema";
 
 export const dynamic = "force-dynamic";
 
 const USDT_DECIMALS = 18;
 
-/*
- * Evento ERC-20:
- *
- * Transfer(address,address,uint256)
- */
 const TRANSFER_TOPIC =
   "0xddf252ad1be2c89b69c2b068fc378daa" +
   "952ba7f163c4a11628f55a4df523b3ef";
 
-/*
- * Convierte una dirección en topic.
- */
 function addressToTopic(address) {
   const clean = String(address || "")
     .toLowerCase()
     .replace(/^0x/, "");
+
+  if (!/^[0-9a-f]{40}$/.test(clean)) {
+    throw new Error("Dirección de wallet inválida.");
+  }
 
   return (
     "0x000000000000000000000000" +
@@ -36,9 +31,6 @@ function addressToTopic(address) {
   );
 }
 
-/*
- * Convierte número decimal a hexadecimal RPC.
- */
 function toRpcHex(number) {
   return (
     "0x" +
@@ -46,14 +38,8 @@ function toRpcHex(number) {
   );
 }
 
-/*
- * Convierte una cantidad USDT a unidades
- * de 18 decimales usando BigInt.
- */
 function usdtToUnits(value) {
-  const text = String(
-    value ?? "0"
-  ).trim();
+  const text = String(value ?? "0").trim();
 
   if (!text || text.startsWith("-")) {
     return 0n;
@@ -61,16 +47,26 @@ function usdtToUnits(value) {
 
   const parts = text.split(".");
 
-  const whole =
-    parts[0] || "0";
+  const whole = parts[0] || "0";
+  const fraction = parts[1] || "";
 
-  const fraction =
-    parts[1] || "";
+  if (!/^\d+$/.test(whole)) {
+    throw new Error("Cantidad USDT inválida.");
+  }
 
-  const padded = (
+  if (fraction && !/^\d+$/.test(fraction)) {
+    throw new Error("Cantidad USDT inválida.");
+  }
+
+  if (fraction.length > USDT_DECIMALS) {
+    throw new Error("Cantidad USDT con demasiados decimales.");
+  }
+
+  const padded =
     fraction +
-    "0".repeat(USDT_DECIMALS)
-  ).slice(0, USDT_DECIMALS);
+    "0".repeat(
+      USDT_DECIMALS - fraction.length
+    );
 
   return (
     BigInt(whole) *
@@ -79,9 +75,6 @@ function usdtToUnits(value) {
   );
 }
 
-/*
- * Realiza una petición JSON-RPC.
- */
 async function rpcRequest(
   rpcUrl,
   method,
@@ -91,19 +84,15 @@ async function rpcRequest(
     rpcUrl,
     {
       method: "POST",
-
       headers: {
-        "Content-Type":
-          "application/json",
+        "Content-Type": "application/json",
       },
-
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: Date.now(),
         method,
         params,
       }),
-
       cache: "no-store",
     }
   );
@@ -114,32 +103,23 @@ async function rpcRequest(
     );
   }
 
-  const data =
-    await response.json();
+  const data = await response.json();
 
   if (data.error) {
     throw new Error(
       data.error.message ||
-        "RPC error"
+        "Error RPC de BNB Smart Chain."
     );
   }
 
   return data.result;
 }
 
-/*
- * Obtiene los códigos entregados.
- */
-async function getDeliveredCodes(
-  orderId
-) {
+async function getDeliveredCodes(orderId) {
   return await db
     .select({
-      productId:
-        giftCardCodes.productId,
-
-      code:
-        giftCardCodes.code,
+      productId: giftCardCodes.productId,
+      code: giftCardCodes.code,
     })
     .from(giftCardCodes)
     .where(
@@ -148,7 +128,6 @@ async function getDeliveredCodes(
           giftCardCodes.orderId,
           orderId
         ),
-
         eq(
           giftCardCodes.status,
           "delivered"
@@ -157,55 +136,43 @@ async function getDeliveredCodes(
     );
 }
 
-export async function POST(
-  request
-) {
+export async function POST(request) {
   try {
-    /*
-     * ============================
-     * 1. LEER PEDIDO
-     * ============================
-     */
+    const body = await request.json();
 
-    const body =
-      await request.json();
+    const orderId = Number(
+      body?.orderId
+    );
 
-    const orderId =
-      Number(body?.orderId);
+    const reference = String(
+      body?.reference || ""
+    ).trim();
 
     if (
       !Number.isInteger(orderId) ||
-      orderId <= 0
+      orderId <= 0 ||
+      !reference
     ) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            "ID de pedido inválido.",
+            "ID o referencia de pedido inválidos.",
         },
-        {
-          status: 400,
-        }
+        { status: 400 }
       );
     }
 
-    /*
-     * ============================
-     * 2. BUSCAR PEDIDO
-     * ============================
-     */
-
-    const [order] =
-      await db
-        .select()
-        .from(orders)
-        .where(
-          eq(
-            orders.id,
-            orderId
-          )
+    const [order] = await db
+      .select()
+      .from(orders)
+      .where(
+        eq(
+          orders.id,
+          orderId
         )
-        .limit(1);
+      )
+      .limit(1);
 
     if (!order) {
       return NextResponse.json(
@@ -214,16 +181,25 @@ export async function POST(
           error:
             "Pedido no encontrado.",
         },
+        { status: 404 }
+      );
+    }
+
+    if (
+      order.reference !== reference
+    ) {
+      return NextResponse.json(
         {
-          status: 404,
-        }
+          ok: false,
+          error:
+            "Referencia de pedido inválida.",
+        },
+        { status: 403 }
       );
     }
 
     /*
-     * ============================
-     * 3. SI YA FUE ENTREGADO
-     * ============================
+     * PEDIDO YA ENTREGADO
      */
 
     if (
@@ -237,11 +213,8 @@ export async function POST(
 
       return NextResponse.json({
         ok: true,
-
         paid: true,
-
         delivered: true,
-
         expired: false,
 
         order: {
@@ -256,9 +229,7 @@ export async function POST(
     }
 
     /*
-     * ============================
-     * 4. PEDIDO EXPIRADO
-     * ============================
+     * PEDIDO EXPIRADO
      */
 
     if (
@@ -267,11 +238,8 @@ export async function POST(
     ) {
       return NextResponse.json({
         ok: true,
-
         paid: false,
-
         delivered: false,
-
         expired: true,
 
         order: {
@@ -287,9 +255,7 @@ export async function POST(
     }
 
     /*
-     * ============================
-     * 5. COMPROBAR EXPIRACIÓN
-     * ============================
+     * COMPROBAR EXPIRACIÓN
      */
 
     if (
@@ -299,18 +265,11 @@ export async function POST(
           order.expiresAt
         ).getTime()
     ) {
-      /*
-       * Liberamos códigos reservados.
-       */
-
       await db
         .update(giftCardCodes)
         .set({
-          status:
-            "available",
-
+          status: "available",
           orderId: null,
-
           reservedAt: null,
         })
         .where(
@@ -319,7 +278,6 @@ export async function POST(
               giftCardCodes.orderId,
               order.id
             ),
-
             eq(
               giftCardCodes.status,
               "reserved"
@@ -327,15 +285,10 @@ export async function POST(
           )
         );
 
-      /*
-       * Marcamos pedido expirado.
-       */
-
       await db
         .update(orders)
         .set({
-          status:
-            "expired",
+          status: "expired",
         })
         .where(
           eq(
@@ -346,11 +299,8 @@ export async function POST(
 
       return NextResponse.json({
         ok: true,
-
         paid: false,
-
         delivered: false,
-
         expired: true,
 
         order: {
@@ -366,18 +316,14 @@ export async function POST(
     }
 
     /*
-     * ============================
-     * 6. VARIABLES DE PAGO
-     * ============================
+     * CONFIGURACIÓN
      */
 
     const rpcUrl =
       process.env.BSC_RPC_URL;
 
     const wallet =
-      process.env.STORE_WALLET_ADDRESS ||
-      process.env
-        .NEXT_PUBLIC_STORE_WALLET_ADDRESS;
+      process.env.STORE_WALLET_ADDRESS;
 
     const usdtContract =
       process.env.USDT_BEP20_CONTRACT;
@@ -390,29 +336,21 @@ export async function POST(
       console.error(
         "PAYMENT_CONFIG_ERROR",
         {
-          rpc:
-            Boolean(rpcUrl),
-
-          wallet:
-            Boolean(wallet),
-
-          contract:
-            Boolean(
-              usdtContract
-            ),
+          rpc: Boolean(rpcUrl),
+          wallet: Boolean(wallet),
+          contract: Boolean(
+            usdtContract
+          ),
         }
       );
 
       return NextResponse.json(
         {
           ok: false,
-
           error:
             "Faltan variables de configuración del pago.",
         },
-        {
-          status: 500,
-        }
+        { status: 500 }
       );
     }
 
@@ -422,16 +360,31 @@ export async function POST(
     const contract =
       usdtContract.toLowerCase();
 
+    if (
+      !/^0x[a-f0-9]{40}$/.test(
+        destination
+      )
+    ) {
+      throw new Error(
+        "STORE_WALLET_ADDRESS no es válida."
+      );
+    }
+
+    if (
+      !/^0x[a-f0-9]{40}$/.test(
+        contract
+      )
+    ) {
+      throw new Error(
+        "USDT_BEP20_CONTRACT no es válida."
+      );
+    }
+
     /*
-     * ============================
-     * 7. CANTIDAD EXACTA DEL PEDIDO
-     * ============================
+     * CANTIDAD EXACTA
      *
-     * IMPORTANTE:
-     *
-     * Usamos paymentAmountUsdt,
-     * NO totalUsdt.
-     *
+     * Esta cantidad es la que el cliente
+     * debe enviar.
      */
 
     const requiredValue =
@@ -442,23 +395,13 @@ export async function POST(
     if (
       requiredValue <= 0n
     ) {
-      return NextResponse.json(
-        {
-          ok: false,
-
-          error:
-            "La cantidad de pago del pedido no es válida.",
-        },
-        {
-          status: 500,
-        }
+      throw new Error(
+        "Cantidad de pago inválida."
       );
     }
 
     /*
-     * ============================
-     * 8. BLOQUE ACTUAL
-     * ============================
+     * BLOQUE ACTUAL
      */
 
     const latestBlockHex =
@@ -475,16 +418,11 @@ export async function POST(
       );
 
     /*
-     * Buscamos aproximadamente
-     * los últimos 20 minutos.
-     *
-     * BSC produce bloques muy rápido,
-     * por eso utilizamos una ventana
-     * limitada para evitar errores
-     * de RPC.
+     * Buscamos una ventana amplia
+     * suficiente para el período del pedido.
      */
 
-    const BLOCK_WINDOW = 2500;
+    const BLOCK_WINDOW = 10000;
 
     const fromBlock =
       Math.max(
@@ -494,9 +432,7 @@ export async function POST(
       );
 
     /*
-     * ============================
-     * 9. BUSCAR TRANSFERENCIAS USDT
-     * ============================
+     * BUSCAR TRANSFERENCIAS USDT
      */
 
     const logs =
@@ -513,25 +449,12 @@ export async function POST(
             toBlock:
               "latest",
 
-            /*
-             * SOLO este contrato.
-             */
-
             address:
               contract,
 
-            /*
-             * Evento Transfer.
-             *
-             * topics[2] =
-             * dirección receptora.
-             */
-
             topics: [
               TRANSFER_TOPIC,
-
               null,
-
               addressToTopic(
                 destination
               ),
@@ -544,18 +467,15 @@ export async function POST(
       !Array.isArray(logs)
     ) {
       throw new Error(
-        "Respuesta RPC inválida."
+        "Respuesta inválida de la blockchain."
       );
     }
 
     /*
-     * ============================
-     * 10. BUSCAR PAGO CORRECTO
-     * ============================
+     * BUSCAR EL PAGO EXACTO
      */
 
-    let matchingLog =
-      null;
+    let matchingLog = null;
 
     for (
       const log of logs
@@ -563,7 +483,7 @@ export async function POST(
       try {
         const txHash =
           String(
-            log.transactionHash ||
+            log?.transactionHash ||
               ""
           );
 
@@ -572,94 +492,79 @@ export async function POST(
         }
 
         /*
-         * Evitamos utilizar
-         * una transacción que
-         * ya haya sido utilizada.
+         * No permitimos reutilizar
+         * una transacción.
          */
 
-        const [
-          alreadyUsed,
-        ] = await db
-          .select({
-            id: orders.id,
-          })
-          .from(orders)
-          .where(
-            eq(
-              orders.txHash,
-              txHash
+        const [used] =
+          await db
+            .select({
+              id: orders.id,
+            })
+            .from(orders)
+            .where(
+              eq(
+                orders.txHash,
+                txHash
+              )
             )
-          )
-          .limit(1);
+            .limit(1);
 
-        if (alreadyUsed) {
+        if (used) {
           continue;
         }
 
-        /*
-         * Cantidad enviada.
-         */
-
         const value =
           BigInt(
-            log.data ||
+            log?.data ||
               "0x0"
           );
 
         /*
-         * El pago debe cubrir
-         * como mínimo la cantidad
-         * exacta solicitada.
+         * IMPORTANTE:
+         *
+         * Debe ser EXACTAMENTE la cantidad
+         * generada para este pedido.
+         *
+         * No usamos >= porque eso podría
+         * permitir asociar el pago de otra
+         * persona.
          */
 
         if (
-          value <
+          value !==
           requiredValue
         ) {
           continue;
         }
 
-        /*
-         * Encontramos un pago
-         * compatible.
-         */
-
         matchingLog =
           log;
 
         break;
-      } catch (
-        logError
-      ) {
+      } catch (error) {
         console.error(
           "PAYMENT_LOG_ERROR:",
-          logError
+          error
         );
       }
     }
 
     /*
-     * ============================
-     * 11. TODAVÍA NO PAGÓ
-     * ============================
+     * TODAVÍA NO HAY PAGO
      */
 
     if (!matchingLog) {
       return NextResponse.json({
         ok: true,
-
         paid: false,
-
         delivered: false,
-
         expired: false,
 
         order: {
           id: order.id,
-
           reference:
             order.reference,
-
           status:
             order.status,
         },
@@ -669,25 +574,13 @@ export async function POST(
       });
     }
 
-    /*
-     * ============================
-     * 12. OBTENER TX HASH
-     * ============================
-     */
-
     const txHash =
       String(
         matchingLog.transactionHash
       );
 
     /*
-     * ============================
-     * 13. VERIFICAR RECEIPT
-     * ============================
-     *
-     * Nos aseguramos de que la
-     * transacción realmente terminó
-     * correctamente.
+     * COMPROBAR RECEIPT
      */
 
     const receipt =
@@ -700,30 +593,26 @@ export async function POST(
     if (!receipt) {
       return NextResponse.json({
         ok: true,
-
         paid: false,
-
         delivered: false,
-
         expired: false,
 
         order: {
           id: order.id,
-
           reference:
             order.reference,
-
           status:
             order.status,
         },
 
         message:
-          "Pago detectado. Esperando confirmación de la red...",
+          "Pago detectado. Esperando confirmación...",
       });
     }
 
     /*
-     * status 0x1 = éxito.
+     * LA TRANSACCIÓN DEBE HABER TERMINADO
+     * CORRECTAMENTE.
      */
 
     if (
@@ -732,35 +621,25 @@ export async function POST(
     ) {
       return NextResponse.json({
         ok: true,
-
         paid: false,
-
         delivered: false,
-
         expired: false,
 
         order: {
           id: order.id,
-
           reference:
             order.reference,
-
           status:
             order.status,
         },
 
         message:
-          "La transacción no fue confirmada correctamente.",
+          "La transacción no fue confirmada.",
       });
     }
 
     /*
-     * ============================
-     * 14. CONFIRMACIONES
-     * ============================
-     *
-     * Esperamos varias confirmaciones
-     * antes de entregar el código.
+     * CONFIRMACIONES
      */
 
     const transactionBlock =
@@ -782,19 +661,14 @@ export async function POST(
     ) {
       return NextResponse.json({
         ok: true,
-
         paid: false,
-
         delivered: false,
-
         expired: false,
 
         order: {
           id: order.id,
-
           reference:
             order.reference,
-
           status:
             order.status,
         },
@@ -805,29 +679,24 @@ export async function POST(
           REQUIRED_CONFIRMATIONS,
 
         message:
-          `Pago detectado. Esperando confirmaciones (${confirmations}/${REQUIRED_CONFIRMATIONS})...`,
+          `Pago detectado. Confirmaciones ${confirmations}/${REQUIRED_CONFIRMATIONS}...`,
       });
     }
 
     /*
-     * ============================
-     * 15. COMPROBAR CÓDIGOS
-     * ============================
+     * CÓDIGOS RESERVADOS
      */
 
     const reservedCodes =
       await db
         .select()
-        .from(
-          giftCardCodes
-        )
+        .from(giftCardCodes)
         .where(
           and(
             eq(
               giftCardCodes.orderId,
               order.id
             ),
-
             eq(
               giftCardCodes.status,
               "reserved"
@@ -839,11 +708,6 @@ export async function POST(
       reservedCodes.length ===
       0
     ) {
-      /*
-       * Puede que otro intento
-       * ya haya entregado los códigos.
-       */
-
       const deliveredCodes =
         await getDeliveredCodes(
           order.id
@@ -878,25 +742,19 @@ export async function POST(
 
         return NextResponse.json({
           ok: true,
-
           paid: true,
-
           delivered: true,
-
           expired: false,
 
           order: {
             id: order.id,
-
             reference:
               order.reference,
-
             status:
               "delivered",
           },
 
           txHash,
-
           codes:
             deliveredCodes,
         });
@@ -905,54 +763,91 @@ export async function POST(
       return NextResponse.json(
         {
           ok: false,
-
           error:
-            "El pedido no tiene códigos reservados disponibles.",
+            "El pedido no tiene códigos reservados.",
         },
-        {
-          status: 500,
-        }
+        { status: 500 }
       );
     }
 
     /*
-     * ============================
-     * 16. MARCAR PAGO
-     * ============================
+     * MARCAR COMO PAGADO
      */
 
-    await db
-      .update(orders)
-      .set({
-        status: "paid",
-
-        txHash,
-
-        paidAt:
-          new Date(),
-      })
-      .where(
-        and(
-          eq(
-            orders.id,
-            order.id
-          ),
-
-          eq(
-            orders.status,
-            "pending"
+    const [updatedOrder] =
+      await db
+        .update(orders)
+        .set({
+          status: "paid",
+          txHash,
+          paidAt: new Date(),
+        })
+        .where(
+          and(
+            eq(
+              orders.id,
+              order.id
+            ),
+            eq(
+              orders.status,
+              "pending"
+            )
           )
         )
-      );
+        .returning();
 
     /*
-     * ============================
-     * 17. ENTREGAR CÓDIGOS
-     * ============================
+     * Si otro proceso ya lo marcó,
+     * volvemos a leer los códigos.
      */
 
-    const deliveredCodes =
-      [];
+    if (!updatedOrder) {
+      const [currentOrder] =
+        await db
+          .select()
+          .from(orders)
+          .where(
+            eq(
+              orders.id,
+              order.id
+            )
+          )
+          .limit(1);
+
+      if (
+        currentOrder?.status ===
+        "delivered"
+      ) {
+        const codes =
+          await getDeliveredCodes(
+            order.id
+          );
+
+        return NextResponse.json({
+          ok: true,
+          paid: true,
+          delivered: true,
+          expired: false,
+
+          order: {
+            id: order.id,
+            reference:
+              order.reference,
+            status:
+              "delivered",
+          },
+
+          txHash,
+          codes,
+        });
+      }
+    }
+
+    /*
+     * ENTREGAR CÓDIGOS
+     */
+
+    const deliveredCodes = [];
 
     for (
       const reservedCode of
@@ -961,9 +856,7 @@ export async function POST(
       const [
         updatedCode,
       ] = await db
-        .update(
-          giftCardCodes
-        )
+        .update(giftCardCodes)
         .set({
           status:
             "delivered",
@@ -1003,9 +896,7 @@ export async function POST(
     }
 
     /*
-     * ============================
-     * 18. COMPROBAR ENTREGA
-     * ============================
+     * VERIFICAR ENTREGA
      */
 
     if (
@@ -1029,24 +920,18 @@ export async function POST(
       return NextResponse.json(
         {
           ok: false,
-
           paid: true,
-
           delivered: false,
 
           error:
-            "El pago fue confirmado, pero no se pudieron entregar todos los códigos.",
+            "El pago fue confirmado, pero hubo un problema entregando los códigos.",
         },
-        {
-          status: 500,
-        }
+        { status: 500 }
       );
     }
 
     /*
-     * ============================
-     * 19. MARCAR PEDIDO ENTREGADO
-     * ============================
+     * MARCAR COMO ENTREGADO
      */
 
     await db
@@ -1070,12 +955,6 @@ export async function POST(
           order.id
         )
       );
-
-    /*
-     * ============================
-     * 20. RESPUESTA FINAL
-     * ============================
-     */
 
     return NextResponse.json({
       ok: true,
@@ -1124,9 +1003,7 @@ export async function POST(
             ? error.message
             : String(error),
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
-}
+          }
