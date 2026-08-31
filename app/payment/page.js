@@ -1,20 +1,42 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function PaymentPage() {
   const [order, setOrder] = useState(null);
   const [cart, setCart] = useState([]);
-  const [txHash, setTxHash] = useState("");
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedAmount, setCopiedAmount] = useState(false);
   const [error, setError] = useState("");
+  const [checking, setChecking] = useState(true);
+
+  const intervalRef = useRef(null);
+  const checkingRef = useRef(false);
 
   useEffect(() => {
     loadOrder();
     loadCart();
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
   }, []);
+
+  useEffect(() => {
+    if (!order?.id) return;
+
+    startAutomaticVerification();
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [order?.id]);
 
   function loadOrder() {
     try {
@@ -25,6 +47,7 @@ export default function PaymentPage() {
         setError(
           "No se encontró el pedido. Regresa al checkout e inténtalo nuevamente."
         );
+        setChecking(false);
         return;
       }
 
@@ -32,9 +55,8 @@ export default function PaymentPage() {
         JSON.parse(savedOrder);
 
       if (!parsedOrder?.id) {
-        setError(
-          "El pedido no es válido."
-        );
+        setError("El pedido no es válido.");
+        setChecking(false);
         return;
       }
 
@@ -48,6 +70,8 @@ export default function PaymentPage() {
       setError(
         "No se pudo cargar el pedido."
       );
+
+      setChecking(false);
     }
   }
 
@@ -74,12 +98,15 @@ export default function PaymentPage() {
           productId: Number(
             item?.productId
           ),
+
           diamonds: String(
             item?.diamonds || ""
           ),
+
           price: Number(
             item?.price || 0
           ),
+
           quantity: Math.max(
             1,
             Number(
@@ -113,9 +140,8 @@ export default function PaymentPage() {
   );
 
   /*
-   * IMPORTANTE:
-   * Esta dirección debe configurarse
-   * posteriormente en Vercel.
+   * Dirección pública de la billetera
+   * donde recibirás los USDT.
    */
   const walletAddress =
     process.env
@@ -155,27 +181,39 @@ export default function PaymentPage() {
     }
   }
 
-  async function verifyPayment() {
-    setError("");
+  async function copyAmount() {
+    try {
+      await navigator.clipboard.writeText(
+        paymentAmount.toFixed(6)
+      );
 
-    const hash =
-      txHash.trim();
+      setCopiedAmount(true);
 
+      setTimeout(() => {
+        setCopiedAmount(false);
+      }, 2000);
+    } catch (error) {
+      console.error(
+        "COPY_AMOUNT_ERROR:",
+        error
+      );
+
+      alert(
+        "No se pudo copiar la cantidad."
+      );
+    }
+  }
+
+  async function checkPayment() {
     if (!order?.id) {
-      setError(
-        "No se encontró el pedido."
-      );
-      return;
+      return false;
     }
 
-    if (!hash) {
-      setError(
-        "Introduce el TX Hash de tu pago."
-      );
-      return;
+    if (checkingRef.current) {
+      return false;
     }
 
-    setLoading(true);
+    checkingRef.current = true;
 
     try {
       const response = await fetch(
@@ -190,64 +228,95 @@ export default function PaymentPage() {
 
           body: JSON.stringify({
             orderId: order.id,
-            txHash: hash,
           }),
+
+          cache: "no-store",
         }
       );
 
-      const data =
-        await response.json();
+      let data = null;
 
-      if (!response.ok || !data.ok) {
-        throw new Error(
-          data?.error ||
-            "No se pudo verificar el pago."
-        );
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
       }
 
-      /*
-       * Guardamos la respuesta por si
-       * la página de entrega la necesita.
-       */
+      if (
+        !response.ok ||
+        !data?.ok
+      ) {
+        console.log(
+          "PAYMENT_CHECK:",
+          data?.error ||
+            "Pago todavía no detectado."
+        );
+
+        return false;
+      }
+
       localStorage.setItem(
         "qva_payment_result",
         JSON.stringify(data)
       );
 
-      /*
-       * La ruta final de entrega se
-       * conectará en el siguiente paso.
-       */
-      if (data.order?.status === "paid") {
+      if (
+        data?.order?.status === "paid" ||
+        data?.order?.status === "delivered" ||
+        data?.status === "paid" ||
+        data?.status === "delivered"
+      ) {
+        if (intervalRef.current) {
+          clearInterval(
+            intervalRef.current
+          );
+        }
+
+        setChecking(false);
+        setLoading(false);
+
         window.location.href =
           `/success?order=${encodeURIComponent(
             order.id
           )}`;
-        return;
+
+        return true;
       }
 
-      /*
-       * Si el servidor indica que está
-       * esperando confirmaciones,
-       * mostramos el mensaje.
-       */
-      setError(
-        data?.message ||
-          "Pago recibido. Estamos esperando las confirmaciones de la red."
-      );
+      return false;
     } catch (error) {
       console.error(
-        "VERIFY_PAYMENT_ERROR:",
+        "AUTOMATIC_PAYMENT_CHECK_ERROR:",
         error
       );
 
-      setError(
-        error?.message ||
-          "No se pudo verificar el pago."
-      );
+      return false;
     } finally {
-      setLoading(false);
+      checkingRef.current = false;
     }
+  }
+
+  function startAutomaticVerification() {
+    if (intervalRef.current) {
+      clearInterval(
+        intervalRef.current
+      );
+    }
+
+    setChecking(true);
+
+    /*
+     * Primera comprobación inmediatamente.
+     */
+    checkPayment();
+
+    /*
+     * Después comprobamos cada 5 segundos.
+     */
+    intervalRef.current =
+      setInterval(() => {
+        checkPayment();
+      }, 5000);
   }
 
   return (
@@ -410,6 +479,8 @@ export default function PaymentPage() {
               de pago
             </p>
 
+            {/* DIRECCIÓN */}
+
             <div className="payment-address-box">
 
               <code>
@@ -430,6 +501,62 @@ export default function PaymentPage() {
 
             </div>
 
+            {/* CANTIDAD */}
+
+            <div
+              style={{
+                marginTop: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                padding: "12px",
+                borderRadius: "12px",
+                background:
+                  "rgba(255,255,255,0.04)",
+                border:
+                  "1px solid rgba(255,255,255,0.10)",
+              }}
+            >
+
+              <div
+                style={{
+                  flex: 1,
+                }}
+              >
+
+                <div
+                  style={{
+                    fontSize: "12px",
+                    opacity: 0.65,
+                    marginBottom: "5px",
+                  }}
+                >
+                  CANTIDAD EXACTA A ENVIAR
+                </div>
+
+                <strong
+                  style={{
+                    fontSize: "18px",
+                  }}
+                >
+                  {paymentAmount.toFixed(6)}
+                  {" "}USDT
+                </strong>
+
+              </div>
+
+              <button
+                type="button"
+                onClick={copyAmount}
+                className="copy-button"
+              >
+                {copiedAmount
+                  ? "✓ COPIADO"
+                  : "📋 COPIAR"}
+              </button>
+
+            </div>
+
             <div className="payment-warning">
 
               ⚠️{" "}
@@ -444,36 +571,63 @@ export default function PaymentPage() {
 
           </section>
 
-          {/* TX HASH */}
+          {/* VERIFICACIÓN AUTOMÁTICA */}
 
           <section className="checkout-box">
 
             <h2 className="payment-section-title">
-              Confirmar el pago
+              Verificación automática
             </h2>
 
             <p className="payment-text">
               Después de realizar el pago,
-              introduce el TX Hash de tu
-              transacción.
+              no necesitas introducir ningún
+              TX Hash.
             </p>
 
-            <label className="checkout-label">
-              TX Hash
-            </label>
+            <div
+              style={{
+                marginTop: "16px",
+                padding: "18px",
+                borderRadius: "12px",
+                background:
+                  "rgba(255,255,255,0.04)",
+                border:
+                  "1px solid rgba(255,255,255,0.08)",
+                textAlign: "center",
+              }}
+            >
 
-            <input
-              type="text"
-              value={txHash}
-              onChange={(e) =>
-                setTxHash(
-                  e.target.value
-                )
-              }
-              placeholder="0x..."
-              className="checkout-input"
-              disabled={loading}
-            />
+              <div
+                style={{
+                  fontSize: "28px",
+                  marginBottom: "8px",
+                }}
+              >
+                {checking
+                  ? "⏳"
+                  : "✅"}
+              </div>
+
+              <strong>
+                {checking
+                  ? "Esperando tu pago..."
+                  : "Pago detectado"}
+              </strong>
+
+              <p
+                style={{
+                  marginTop: "8px",
+                  fontSize: "13px",
+                  opacity: 0.65,
+                }}
+              >
+                {checking
+                  ? "Estamos comprobando automáticamente la blockchain."
+                  : "Preparando la entrega de tu pedido."}
+              </p>
+
+            </div>
 
             {error && (
 
@@ -483,9 +637,9 @@ export default function PaymentPage() {
                   padding: "14px",
                   borderRadius: "10px",
                   background:
-                    "rgba(255, 60, 60, 0.10)",
+                    "rgba(255,60,60,0.10)",
                   border:
-                    "1px solid rgba(255, 60, 60, 0.35)",
+                    "1px solid rgba(255,60,60,0.35)",
                   color: "#ff6b6b",
                 }}
               >
@@ -493,31 +647,6 @@ export default function PaymentPage() {
               </div>
 
             )}
-
-            <button
-              type="button"
-              className="checkout-primary-button payment-submit"
-              disabled={
-                loading ||
-                !txHash.trim() ||
-                !order
-              }
-              onClick={
-                verifyPayment
-              }
-            >
-
-              {loading
-                ? "VERIFICANDO..."
-                : "🔍 VERIFICAR PAGO"}
-
-              <span>
-                {loading
-                  ? "⏳"
-                  : "→"}
-              </span>
-
-            </button>
 
           </section>
 
@@ -626,4 +755,4 @@ export default function PaymentPage() {
 
     </main>
   );
-    }
+        }
