@@ -4,21 +4,119 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 export default function PaymentPage() {
-  const [cart, setCart] = useState([]);
   const [order, setOrder] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [creatingOrder, setCreatingOrder] =
-    useState(false);
-
-  const [paymentStatus, setPaymentStatus] =
-    useState("waiting");
-
-  const [deliveredCodes, setDeliveredCodes] =
-    useState([]);
-
-  const [error, setError] = useState("");
+  const [cart, setCart] = useState([]);
+  const [txHash, setTxHash] = useState("");
+  const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
 
+  useEffect(() => {
+    loadOrder();
+    loadCart();
+  }, []);
+
+  function loadOrder() {
+    try {
+      const savedOrder =
+        localStorage.getItem("qva_order");
+
+      if (!savedOrder) {
+        setError(
+          "No se encontró el pedido. Regresa al checkout e inténtalo nuevamente."
+        );
+        return;
+      }
+
+      const parsedOrder =
+        JSON.parse(savedOrder);
+
+      if (!parsedOrder?.id) {
+        setError(
+          "El pedido no es válido."
+        );
+        return;
+      }
+
+      setOrder(parsedOrder);
+    } catch (error) {
+      console.error(
+        "LOAD_ORDER_ERROR:",
+        error
+      );
+
+      setError(
+        "No se pudo cargar el pedido."
+      );
+    }
+  }
+
+  function loadCart() {
+    try {
+      const savedCart =
+        localStorage.getItem("qva_cart");
+
+      if (!savedCart) {
+        setCart([]);
+        return;
+      }
+
+      const parsed =
+        JSON.parse(savedCart);
+
+      if (!Array.isArray(parsed)) {
+        setCart([]);
+        return;
+      }
+
+      setCart(
+        parsed.map((item) => ({
+          productId: Number(
+            item?.productId
+          ),
+          diamonds: String(
+            item?.diamonds || ""
+          ),
+          price: Number(
+            item?.price || 0
+          ),
+          quantity: Math.max(
+            1,
+            Number(
+              item?.quantity || 1
+            )
+          ),
+        }))
+      );
+    } catch (error) {
+      console.error(
+        "LOAD_PAYMENT_CART_ERROR:",
+        error
+      );
+
+      setCart([]);
+    }
+  }
+
+  const total = cart.reduce(
+    (sum, item) =>
+      sum +
+      Number(item.price || 0) *
+        Number(item.quantity || 1),
+    0
+  );
+
+  const paymentAmount = Number(
+    order?.paymentAmountUsdt ||
+      total ||
+      0
+  );
+
+  /*
+   * IMPORTANTE:
+   * Esta dirección debe configurarse
+   * posteriormente en Vercel.
+   */
   const walletAddress =
     process.env
       .NEXT_PUBLIC_STORE_WALLET_ADDRESS ||
@@ -30,12 +128,10 @@ export default function PaymentPage() {
       )}`
     : "";
 
-  function formatUsdt(value) {
-    return Number(value || 0).toFixed(6);
-  }
-
   async function copyAddress() {
-    if (!walletAddress) return;
+    if (!walletAddress) {
+      return;
+    }
 
     try {
       await navigator.clipboard.writeText(
@@ -47,662 +143,117 @@ export default function PaymentPage() {
       setTimeout(() => {
         setCopied(false);
       }, 2000);
-    } catch {
-      setError(
+    } catch (error) {
+      console.error(
+        "COPY_ADDRESS_ERROR:",
+        error
+      );
+
+      alert(
         "No se pudo copiar la dirección."
       );
     }
   }
 
-  /*
-   * Crear pedido automáticamente.
-   */
-  async function createOrder(currentCart) {
-    const email =
-      localStorage.getItem(
-        "qva_customer_email"
-      );
+  async function verifyPayment() {
+    setError("");
 
-    if (!email) {
-      throw new Error(
-        "Falta el correo electrónico. Regresa al checkout."
+    const hash =
+      txHash.trim();
+
+    if (!order?.id) {
+      setError(
+        "No se encontró el pedido."
       );
+      return;
     }
 
-    setCreatingOrder(true);
-
-    const response = await fetch(
-      "/api/create-order",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
-        body: JSON.stringify({
-          email,
-          cart: currentCart,
-        }),
-      }
-    );
-
-    const data =
-      await response.json();
-
-    if (
-      !response.ok ||
-      !data.ok
-    ) {
-      throw new Error(
-        data.error ||
-          "No se pudo crear el pedido."
+    if (!hash) {
+      setError(
+        "Introduce el TX Hash de tu pago."
       );
+      return;
     }
 
-    localStorage.setItem(
-      "qva_order_reference",
-      data.order.reference
-    );
+    setLoading(true);
 
-    localStorage.setItem(
-      "qva_order_total",
-      String(
-        data.order.totalUsdt
-      )
-    );
-
-    localStorage.setItem(
-      "qva_payment_amount",
-      String(
-        data.order.paymentAmountUsdt
-      )
-    );
-
-    if (
-      data.order.expiresAt
-    ) {
-      localStorage.setItem(
-        "qva_order_expires_at",
-        data.order.expiresAt
-      );
-    }
-
-    setOrder(
-      data.order
-    );
-
-    setCreatingOrder(false);
-
-    return data.order;
-  }
-
-  /*
-   * Verificación automática.
-   */
-  async function verifyPayment(
-    reference
-  ) {
     try {
-      const response =
-        await fetch(
-          "/api/verify-payment",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              orderReference:
-                reference,
-            }),
-            cache: "no-store",
-          }
-        );
+      const response = await fetch(
+        "/api/verify-payment",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            orderId: order.id,
+            txHash: hash,
+          }),
+        }
+      );
 
       const data =
         await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || !data.ok) {
         throw new Error(
-          data.error ||
-            "Error verificando el pago."
+          data?.error ||
+            "No se pudo verificar el pago."
         );
       }
 
-      if (
-        data.expired
-      ) {
-        setPaymentStatus(
-          "expired"
-        );
-        return true;
-      }
-
-      if (
-        data.paid &&
-        data.delivered
-      ) {
-        setDeliveredCodes(
-          data.codes || []
-        );
-
-        setPaymentStatus(
-          "delivered"
-        );
-
-        localStorage.removeItem(
-          "qva_cart"
-        );
-
-        return true;
-      }
-
-      setPaymentStatus(
-        "waiting"
-      );
-
-      return false;
-
-    } catch (err) {
-      console.error(
-        "PAYMENT_CHECK:",
-        err
+      /*
+       * Guardamos la respuesta por si
+       * la página de entrega la necesita.
+       */
+      localStorage.setItem(
+        "qva_payment_result",
+        JSON.stringify(data)
       );
 
       /*
-       * No mostramos un error cada
-       * 15 segundos al cliente.
-       *
-       * El sistema seguirá intentando.
+       * La ruta final de entrega se
+       * conectará en el siguiente paso.
        */
-      return false;
-    }
-  }
-
-  /*
-   * Inicializar página.
-   */
-  useEffect(() => {
-    let mounted = true;
-
-    async function initialize() {
-      try {
-        const savedCart =
-          localStorage.getItem(
-            "qva_cart"
-          );
-
-        if (!savedCart) {
-          throw new Error(
-            "Tu carrito está vacío."
-          );
-        }
-
-        const currentCart =
-          JSON.parse(
-            savedCart
-          );
-
-        if (
-          !Array.isArray(
-            currentCart
-          ) ||
-          !currentCart.length
-        ) {
-          throw new Error(
-            "Tu carrito está vacío."
-          );
-        }
-
-        if (!mounted) return;
-
-        setCart(
-          currentCart
-        );
-
-        /*
-         * Si ya existe un pedido,
-         * continuamos con él.
-         */
-        const savedReference =
-          localStorage.getItem(
-            "qva_order_reference"
-          );
-
-        const savedTotal =
-          localStorage.getItem(
-            "qva_order_total"
-          );
-
-        const savedPaymentAmount =
-          localStorage.getItem(
-            "qva_payment_amount"
-          );
-
-        const savedExpires =
-          localStorage.getItem(
-            "qva_order_expires_at"
-          );
-
-        if (
-          savedReference &&
-          savedTotal &&
-          savedPaymentAmount
-        ) {
-          const expired =
-            savedExpires &&
-            new Date(
-              savedExpires
-            ).getTime() <=
-              Date.now();
-
-          if (!expired) {
-            setOrder({
-              reference:
-                savedReference,
-              totalUsdt:
-                Number(
-                  savedTotal
-                ),
-              paymentAmountUsdt:
-                Number(
-                  savedPaymentAmount
-                ),
-              expiresAt:
-                savedExpires,
-            });
-
-            setLoading(false);
-
-            return;
-          }
-
-          localStorage.removeItem(
-            "qva_order_reference"
-          );
-
-          localStorage.removeItem(
-            "qva_order_total"
-          );
-
-          localStorage.removeItem(
-            "qva_payment_amount"
-          );
-
-          localStorage.removeItem(
-            "qva_order_expires_at"
-          );
-        }
-
-        await createOrder(
-          currentCart
-        );
-
-        if (mounted) {
-          setLoading(false);
-        }
-
-      } catch (err) {
-        console.error(
-          "PAYMENT_INIT:",
-          err
-        );
-
-        if (mounted) {
-          setError(
-            err.message ||
-              "No se pudo iniciar el pago."
-          );
-
-          setLoading(false);
-          setCreatingOrder(false);
-        }
+      if (data.order?.status === "paid") {
+        window.location.href =
+          `/success?order=${encodeURIComponent(
+            order.id
+          )}`;
+        return;
       }
-    }
 
-    initialize();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  /*
-   * Polling automático.
-   *
-   * No hay botón "Verificar".
-   * No hay TX Hash.
-   */
-  useEffect(() => {
-    if (
-      !order?.reference ||
-      paymentStatus ===
-        "delivered" ||
-      paymentStatus ===
-        "expired"
-    ) {
-      return;
-    }
-
-    let stopped = false;
-
-    async function check() {
-      if (stopped) return;
-
-      await verifyPayment(
-        order.reference
+      /*
+       * Si el servidor indica que está
+       * esperando confirmaciones,
+       * mostramos el mensaje.
+       */
+      setError(
+        data?.message ||
+          "Pago recibido. Estamos esperando las confirmaciones de la red."
       );
-    }
-
-    check();
-
-    const interval =
-      setInterval(
-        check,
-        10000
+    } catch (error) {
+      console.error(
+        "VERIFY_PAYMENT_ERROR:",
+        error
       );
 
-    return () => {
-      stopped = true;
-      clearInterval(
-        interval
+      setError(
+        error?.message ||
+          "No se pudo verificar el pago."
       );
-    };
-  }, [
-    order?.reference,
-    paymentStatus,
-  ]);
-
-  if (loading) {
-    return (
-      <main className="payment-page">
-
-        <div
-          style={{
-            minHeight: "100vh",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexDirection: "column",
-            gap: "18px",
-          }}
-        >
-
-          <div className="payment-spinner" />
-
-          <h2>
-            Preparando tu pedido...
-          </h2>
-
-          <p>
-            Estamos preparando tu
-            dirección de pago.
-          </p>
-
-        </div>
-
-      </main>
-    );
+    } finally {
+      setLoading(false);
+    }
   }
 
-  if (error) {
-    return (
-      <main className="payment-page">
-
-        <header className="checkout-header">
-
-          <Link
-            href="/"
-            className="checkout-logo"
-          >
-            🤖 Qva🇨🇺CHOP 🛒
-          </Link>
-
-        </header>
-
-        <div
-          className="payment-container"
-          style={{
-            display: "block",
-            maxWidth: "700px",
-            margin: "0 auto",
-          }}
-        >
-
-          <section className="checkout-box">
-
-            <h1>
-              ⚠️ No pudimos preparar el pago
-            </h1>
-
-            <p>
-              {error}
-            </p>
-
-            <Link
-              href="/checkout"
-              className="checkout-primary-button"
-            >
-              ← Volver al checkout
-            </Link>
-
-          </section>
-
-        </div>
-
-      </main>
-    );
-  }
-
-  /*
-   * PEDIDO ENTREGADO
-   */
-  if (
-    paymentStatus ===
-    "delivered"
-  ) {
-    return (
-      <main className="payment-page">
-
-        <header className="checkout-header">
-
-          <Link
-            href="/"
-            className="checkout-logo"
-          >
-            🤖 Qva🇨🇺CHOP 🛒
-          </Link>
-
-          <div className="checkout-secure">
-            ✅ Pago confirmado
-          </div>
-
-        </header>
-
-        <div
-          className="payment-container"
-          style={{
-            display: "block",
-            maxWidth: "760px",
-            margin: "0 auto",
-          }}
-        >
-
-          <section className="checkout-box">
-
-            <div
-              style={{
-                textAlign: "center",
-              }}
-            >
-
-              <div
-                style={{
-                  fontSize: "60px",
-                  marginBottom: "10px",
-                }}
-              >
-                🎉
-              </div>
-
-              <h1>
-                ¡Pedido entregado!
-              </h1>
-
-              <p>
-                Tu pago fue confirmado
-                automáticamente.
-              </p>
-
-            </div>
-
-            <div
-              style={{
-                marginTop: "25px",
-              }}
-            >
-
-              <h2>
-                🎁 Tu código
-              </h2>
-
-              {deliveredCodes.map(
-                (item, index) => (
-                  <div
-                    key={`${item.code}-${index}`}
-                    style={{
-                      marginTop:
-                        "14px",
-                      padding:
-                        "18px",
-                      borderRadius:
-                        "12px",
-                      background:
-                        "rgba(255,255,255,0.05)",
-                      textAlign:
-                        "center",
-                    }}
-                  >
-
-                    <strong
-                      style={{
-                        fontSize:
-                          "20px",
-                        wordBreak:
-                          "break-all",
-                      }}
-                    >
-                      {item.code}
-                    </strong>
-
-                  </div>
-                )
-              )}
-
-            </div>
-
-            <div
-              style={{
-                marginTop: "25px",
-                textAlign: "center",
-                fontSize: "14px",
-                opacity: 0.75,
-              }}
-            >
-              Pedido:{" "}
-              {order?.reference}
-            </div>
-
-            <Link
-              href="/"
-              className="checkout-primary-button"
-              style={{
-                marginTop: "20px",
-                display: "flex",
-              }}
-            >
-              🛍️ Volver a la tienda
-            </Link>
-
-          </section>
-
-        </div>
-
-      </main>
-    );
-  }
-
-  /*
-   * PEDIDO EXPIRADO
-   */
-  if (
-    paymentStatus ===
-    "expired"
-  ) {
-    return (
-      <main className="payment-page">
-
-        <div
-          className="payment-container"
-          style={{
-            display: "block",
-            maxWidth: "700px",
-            margin: "0 auto",
-          }}
-        >
-
-          <section className="checkout-box">
-
-            <div
-              style={{
-                textAlign: "center",
-              }}
-            >
-
-              <div
-                style={{
-                  fontSize: "55px",
-                }}
-              >
-                ⏰
-              </div>
-
-              <h1>
-                Pedido expirado
-              </h1>
-
-              <p>
-                El tiempo para realizar
-                el pago terminó.
-              </p>
-
-              <Link
-                href="/"
-                className="checkout-primary-button"
-                style={{
-                  marginTop: "20px",
-                  display: "flex",
-                }}
-              >
-                🛍️ Volver a la tienda
-              </Link>
-
-            </div>
-
-          </section>
-
-        </div>
-
-      </main>
-    );
-  }
-
-  /*
-   * PÁGINA DE PAGO
-   */
   return (
     <main className="payment-page">
+
+      {/* HEADER */}
 
       <header className="checkout-header">
 
@@ -710,7 +261,7 @@ export default function PaymentPage() {
           href="/"
           className="checkout-logo"
         >
-          🤖 Qva🇨🇺CHOP 🛒
+          🎮 Qva🇨🇺CHOP 🛒
         </Link>
 
         <div className="checkout-secure">
@@ -719,16 +270,18 @@ export default function PaymentPage() {
 
       </header>
 
-      <div
-        className="payment-container"
-      >
+      {/* CONTENIDO */}
+
+      <div className="payment-container">
 
         <div className="payment-main">
+
+          {/* TÍTULO */}
 
           <div className="checkout-heading">
 
             <p className="checkout-step">
-              PAGO
+              PASO 2 DE 2
             </p>
 
             <h1>
@@ -736,49 +289,50 @@ export default function PaymentPage() {
             </h1>
 
             <p>
-              Envía exactamente el importe
-              indicado usando USDT BEP-20.
-              Después no necesitas hacer nada.
+              Realiza el pago utilizando
+              USDT en la red BNB Smart
+              Chain (BEP-20).
             </p>
 
           </div>
 
+          {/* PEDIDO */}
+
+          {order && (
+
+            <section className="checkout-box">
+
+              <div className="payment-small-title">
+                PEDIDO
+              </div>
+
+              <strong>
+                {order.reference}
+              </strong>
+
+            </section>
+
+          )}
+
           {/* IMPORTE */}
 
-          <section
-            className="checkout-box payment-total-box"
-          >
+          <section className="checkout-box payment-total-box">
 
             <div>
 
               <p className="payment-small-title">
-                IMPORTE EXACTO A ENVIAR
+                TOTAL A PAGAR
               </p>
 
               <div className="payment-big-amount">
 
-                {formatUsdt(
-                  order?.paymentAmountUsdt
-                )}
+                {paymentAmount.toFixed(6)}
 
                 <span>
                   {" "}USDT
                 </span>
 
               </div>
-
-              <p
-                style={{
-                  marginTop: "8px",
-                  fontSize: "13px",
-                  opacity: 0.7,
-                }}
-              >
-                El importe contiene una
-                pequeña fracción para
-                identificar automáticamente
-                tu pedido.
-              </p>
 
             </div>
 
@@ -818,7 +372,7 @@ export default function PaymentPage() {
 
           </section>
 
-          {/* QR */}
+          {/* QR + DIRECCIÓN */}
 
           <section className="checkout-box">
 
@@ -827,25 +381,34 @@ export default function PaymentPage() {
             </h2>
 
             <p className="payment-text">
-              Escanea el QR o copia la
-              dirección de la billetera.
+              Escanea el código QR o copia
+              la dirección de la billetera.
             </p>
 
             <div className="payment-qr-card">
 
               {qrUrl ? (
+
                 <img
                   src={qrUrl}
                   alt="QR de pago USDT BEP-20"
                   className="payment-qr-image"
                 />
+
               ) : (
+
                 <div className="qr-placeholder-large">
                   QR
                 </div>
+
               )}
 
             </div>
+
+            <p className="qr-caption">
+              Escanea para copiar la dirección
+              de pago
+            </p>
 
             <div className="payment-address-box">
 
@@ -856,13 +419,9 @@ export default function PaymentPage() {
 
               <button
                 type="button"
-                onClick={
-                  copyAddress
-                }
+                onClick={copyAddress}
                 className="copy-button"
-                disabled={
-                  !walletAddress
-                }
+                disabled={!walletAddress}
               >
                 {copied
                   ? "✓ COPIADO"
@@ -878,52 +437,87 @@ export default function PaymentPage() {
                 Importante:
               </strong>{" "}
               envía únicamente USDT por
-              la red BEP-20 y exactamente
-              el importe indicado arriba.
+              la red BEP-20. No utilices
+              otra red.
 
             </div>
 
           </section>
 
-          {/* ESTADO AUTOMÁTICO */}
+          {/* TX HASH */}
 
           <section className="checkout-box">
 
-            <div
-              style={{
-                textAlign: "center",
-              }}
+            <h2 className="payment-section-title">
+              Confirmar el pago
+            </h2>
+
+            <p className="payment-text">
+              Después de realizar el pago,
+              introduce el TX Hash de tu
+              transacción.
+            </p>
+
+            <label className="checkout-label">
+              TX Hash
+            </label>
+
+            <input
+              type="text"
+              value={txHash}
+              onChange={(e) =>
+                setTxHash(
+                  e.target.value
+                )
+              }
+              placeholder="0x..."
+              className="checkout-input"
+              disabled={loading}
+            />
+
+            {error && (
+
+              <div
+                style={{
+                  marginTop: "14px",
+                  padding: "14px",
+                  borderRadius: "10px",
+                  background:
+                    "rgba(255, 60, 60, 0.10)",
+                  border:
+                    "1px solid rgba(255, 60, 60, 0.35)",
+                  color: "#ff6b6b",
+                }}
+              >
+                ⚠️ {error}
+              </div>
+
+            )}
+
+            <button
+              type="button"
+              className="checkout-primary-button payment-submit"
+              disabled={
+                loading ||
+                !txHash.trim() ||
+                !order
+              }
+              onClick={
+                verifyPayment
+              }
             >
 
-              <div className="payment-spinner" />
+              {loading
+                ? "VERIFICANDO..."
+                : "🔍 VERIFICAR PAGO"}
 
-              <h2
-                className="payment-section-title"
-                style={{
-                  marginTop: "18px",
-                }}
-              >
-                Esperando el pago...
-              </h2>
+              <span>
+                {loading
+                  ? "⏳"
+                  : "→"}
+              </span>
 
-              <p className="payment-text">
-                No necesitas introducir
-                TX Hash ni confirmar nada.
-              </p>
-
-              <p
-                style={{
-                  fontSize: "13px",
-                  opacity: 0.65,
-                  marginTop: "12px",
-                }}
-              >
-                Comprobamos automáticamente
-                la blockchain cada pocos
-                segundos.
-              </p>
-
-            </div>
+            </button>
 
           </section>
 
@@ -957,43 +551,57 @@ export default function PaymentPage() {
 
           <div className="summary-items">
 
-            {cart.map(
-              (item, index) => (
-                <div
-                  className="summary-item"
-                  key={`${item.productId}-${index}`}
-                >
+            {cart.map((item) => (
 
-                  <span>
-                    💎{" "}
-                    {item.diamonds}
-                    {" Diamonds"}
-                  </span>
+              <div
+                className="summary-item"
+                key={item.productId}
+              >
 
-                  <strong>
-                    {Number(
+                <span>
+                  💎 {item.diamonds} ×{" "}
+                  {item.quantity}
+                </span>
+
+                <strong>
+                  {(
+                    Number(
                       item.price
-                    ).toFixed(2)}
-                  </strong>
+                    ) *
+                    Number(
+                      item.quantity
+                    )
+                  ).toFixed(2)}
+                </strong>
 
-                </div>
-              )
-            )}
+              </div>
+
+            ))}
 
           </div>
 
           <div className="summary-line">
 
             <span>
-              Total
+              Subtotal
             </span>
 
             <span>
-              {Number(
-                order?.totalUsdt || 0
-              ).toFixed(2)}
-              {" "}USDT
+              {total.toFixed(2)} USDT
             </span>
+
+          </div>
+
+          <div className="summary-total">
+
+            <span>
+              Total
+            </span>
+
+            <strong>
+              {paymentAmount.toFixed(6)}
+              {" "}USDT
+            </strong>
 
           </div>
 
@@ -1004,8 +612,10 @@ export default function PaymentPage() {
             </div>
 
             <p>
-              El pago se verifica
-              automáticamente.
+              Comprueba siempre que
+              la dirección y la red
+              sean correctas antes
+              de enviar.
             </p>
 
           </div>
@@ -1016,4 +626,4 @@ export default function PaymentPage() {
 
     </main>
   );
-      }
+    }
