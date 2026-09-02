@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
-import { db } from "../../../../../lib/db";
+import { db } from "@/lib/db";
 import {
   orders,
   orderItems,
   giftCardCodes,
-} from "../../../../../db/schema";
+} from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +60,6 @@ export async function GET(request, { params }) {
 
     return NextResponse.json({
       ok: true,
-
       order: {
         id: order.id,
         reference: order.reference,
@@ -75,9 +74,7 @@ export async function GET(request, { params }) {
         expiresAt: order.expiresAt,
         createdAt: order.createdAt,
       },
-
       items,
-
       codes,
     });
   } catch (error) {
@@ -94,4 +91,4 @@ export async function GET(request, { params }) {
       { status: 500 }
     );
   }
-  }
+}
