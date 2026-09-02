@@ -61,9 +61,7 @@ export async function GET(request, { params }) {
         deliveredAt: giftCardCodes.deliveredAt,
       })
       .from(giftCardCodes)
-      .where(
-        eq(giftCardCodes.orderId, orderId)
-      );
+      .where(eq(giftCardCodes.orderId, orderId));
 
     return NextResponse.json({
       ok: true,
@@ -71,12 +69,9 @@ export async function GET(request, { params }) {
       order: {
         id: order.id,
         reference: order.reference,
-        customerEmail:
-          order.customerEmail,
+        customerEmail: order.customerEmail,
 
-        totalUsdt: Number(
-          order.totalUsdt
-        ),
+        totalUsdt: Number(order.totalUsdt),
 
         paymentAmountUsdt: Number(
           order.paymentAmountUsdt
@@ -86,14 +81,11 @@ export async function GET(request, { params }) {
 
         paidAt: order.paidAt,
 
-        deliveredAt:
-          order.deliveredAt,
+        deliveredAt: order.deliveredAt,
 
-        expiresAt:
-          order.expiresAt,
+        expiresAt: order.expiresAt,
 
-        createdAt:
-          order.createdAt,
+        createdAt: order.createdAt,
       },
 
       items,
