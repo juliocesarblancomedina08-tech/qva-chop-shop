@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import { db } from "../../../../lib/db";
 import {
   orders,
   orderItems,
   giftCardCodes,
-} from "@/db/schema";
+} from "../../../../db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +22,9 @@ export async function GET(request, { params }) {
           ok: false,
           error: "ID de pedido inválido.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
@@ -38,7 +40,9 @@ export async function GET(request, { params }) {
           ok: false,
           error: "Pedido no encontrado.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
@@ -60,21 +64,33 @@ export async function GET(request, { params }) {
 
     return NextResponse.json({
       ok: true,
+
       order: {
         id: order.id,
         reference: order.reference,
         customerEmail: order.customerEmail,
-        totalUsdt: Number(order.totalUsdt),
+
+        totalUsdt: Number(
+          order.totalUsdt
+        ),
+
         paymentAmountUsdt: Number(
           order.paymentAmountUsdt
         ),
+
         status: order.status,
+
         paidAt: order.paidAt,
+
         deliveredAt: order.deliveredAt,
+
         expiresAt: order.expiresAt,
+
         createdAt: order.createdAt,
       },
+
       items,
+
       codes,
     });
   } catch (error) {
@@ -86,9 +102,12 @@ export async function GET(request, { params }) {
     return NextResponse.json(
       {
         ok: false,
-        error: "No se pudo consultar el pedido.",
+        error:
+          "No se pudo consultar el pedido.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
